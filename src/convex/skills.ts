@@ -13,10 +13,12 @@ export const list = query({
     const user = await getCurrentUser(ctx);
     if (!user) return { rows: [], enabled: [] as string[] };
 
-    const rows = await ctx.db
+    const allRows = await ctx.db
       .query("userSkills")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
+    // Tool rows share this table but are owned by the Tools tab.
+    const rows = allRows.filter((row) => row.kind !== "tool");
 
     const enabled: string[] = [];
     const customs: Array<{
@@ -71,6 +73,7 @@ export const toggle = mutation({
         userId: user._id,
         skillId,
         enabled,
+        kind: "skill",
         custom: undefined,
       });
     }
@@ -138,10 +141,12 @@ export const enabledPrompts = query({
   handler: async (ctx) => {
     const user = await getCurrentUser(ctx);
     if (!user) return [];
-    const rows = await ctx.db
-      .query("userSkills")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
+    const rows = (
+      await ctx.db
+        .query("userSkills")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .collect()
+    ).filter((row) => row.kind !== "tool");
     const enabledIds = new Set(rows.filter((r) => r.enabled).map((r) => r.skillId));
     const prompts: string[] = [];
     for (const skill of BUILT_IN_SKILLS) {

@@ -12,6 +12,7 @@ export type WorkspaceTab =
   | "keys"
   | "integrations"
   | "skills"
+  | "tools"
   | "ui";
 
 const TABS: { value: WorkspaceTab; label: string }[] = [
@@ -19,6 +20,7 @@ const TABS: { value: WorkspaceTab; label: string }[] = [
   { value: "code", label: "Код" },
   { value: "data", label: "Данные" },
   { value: "skills", label: "Навыки" },
+  { value: "tools", label: "Инструменты" },
   { value: "keys", label: "API-ключи" },
   { value: "integrations", label: "Интеграции" },
   { value: "ui", label: "UI-компоненты" },
@@ -35,8 +37,12 @@ export function WorkspaceTabs({
 }) {
   const status = useQuery(api.settings.status, {});
   return (
-    <div className="flex items-center justify-between border-b border-border/70 px-2">
-      <Tabs value={value} onValueChange={(v) => onChange(v as WorkspaceTab)}>
+    <div className="flex items-center justify-between gap-2 border-b border-border/70 px-2">
+      <Tabs
+        value={value}
+        onValueChange={(v) => onChange(v as WorkspaceTab)}
+        className="min-w-0 flex-1 overflow-x-auto"
+      >
         <TabsList className="h-8 rounded-none border-0 bg-transparent p-0">
           {TABS.map((tab) => (
             <TabsTrigger
@@ -52,7 +58,7 @@ export function WorkspaceTabs({
           ))}
         </TabsList>
       </Tabs>
-      <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
         {version && version > 0 ? (
           <Badge
             variant="outline"

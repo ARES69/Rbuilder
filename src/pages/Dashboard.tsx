@@ -18,6 +18,8 @@ import {
   UiComponentsPanel,
 } from "@/components/workspace-panels";
 import { SkillsPanel } from "@/components/skills-panel";
+import { ToolsPanel } from "@/components/tools-panel";
+import { resolveEnabledTools } from "@/lib/tools";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -116,6 +118,7 @@ export default function Dashboard() {
     effectiveProjectId ? { projectId: effectiveProjectId } : "skip",
   );
   const enabledSkillPrompts = useQuery(api.skills.enabledPrompts, {});
+  const toolState = useQuery(api.tools.list, {});
 
   // Keep chat scrolled to the latest message.
   useEffect(() => {
@@ -254,6 +257,7 @@ export default function Dashboard() {
           enabledSkillPrompts && enabledSkillPrompts.length > 0
             ? enabledSkillPrompts
             : undefined,
+        toolIds: resolveEnabledTools(toolState?.rows ?? []),
       });
 
       await commitBuild({
@@ -544,10 +548,12 @@ export default function Dashboard() {
           ) : (
             <PanelEmpty text="Create a project to browse its data." />
           )
-        ) : workspaceTab === "keys" ? (
-          <ApiKeysPanel />
         ) : workspaceTab === "skills" ? (
           <SkillsPanel activeModelId={activeModel.id} />
+        ) : workspaceTab === "tools" ? (
+          <ToolsPanel />
+        ) : workspaceTab === "keys" ? (
+          <ApiKeysPanel />
         ) : workspaceTab === "integrations" ? (
           <IntegrationsPanel />
         ) : (

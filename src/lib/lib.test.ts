@@ -5,6 +5,15 @@ import { STARTER_TEMPLATES } from "./templates";
 import { CAPABILITIES } from "./capabilities";
 import { RU_SERVICES, SERVICE_CATEGORIES, findService } from "./ru-services";
 import { THEMES } from "./theme";
+import {
+  TOOLS,
+  TOOL_GROUPS,
+  defaultEnabledToolIds,
+  findTool,
+  hasTool,
+  resolveEnabledTools,
+  toolDirectives,
+} from "./tools";
 
 /* --------------------------------- models -------------------------------- */
 
@@ -140,6 +149,97 @@ describe("themes", () => {
     ]);
     const darkBlue = THEMES.find((t) => t.id === "tomorrow-dark");
     expect(darkBlue!.label).toBe("Tomorrow Dark Blue");
+  });
+});
+
+/* ---------------------------------- tools -------------------------------- */
+
+describe("agent tools", () => {
+  test("catalog has unique ids, names and complete directives", () => {
+    const ids = new Set(TOOLS.map((t) => t.id));
+    expect(ids.size).toBe(TOOLS.length);
+    for (const tool of TOOLS) {
+      expect(tool.name.length).toBeGreaterThan(0);
+      expect(tool.desc.length).toBeGreaterThan(0);
+      expect(tool.directive.startsWith("TOOL ")).toBe(true);
+      expect(tool.directive.length).toBeGreaterThan(40);
+    }
+  });
+
+  test("every tool belongs to a declared group", () => {
+    const groupIds = new Set(TOOL_GROUPS.map((g) => g.id));
+    for (const tool of TOOLS) {
+      expect(groupIds.has(tool.group)).toBe(true);
+    }
+  });
+
+  test("tools ported from the freebuff runtime are the majority", () => {
+    const ported = TOOLS.filter((t) => t.origin === "freebuff");
+    expect(ported.length).toBeGreaterThan(15);
+    for (const id of [
+      "read_files",
+      "write_file",
+      "str_replace",
+      "code_search",
+      "run_terminal_command",
+      "browser_navigate",
+      "web_search",
+      "thinker",
+      "context_pruner",
+      "editor_best_of_n",
+      "file_picker",
+      "basher",
+      "gravity_index",
+    ]) {
+      expect(findTool(id)).toBeDefined();
+      expect(findTool(id)!.origin).toBe("freebuff");
+    }
+  });
+
+  test("stage-owning tools are thinker (plan) and reviewer (review)", () => {
+    const withEffect = TOOLS.filter((t) => t.effect);
+    expect(withEffect.map((t) => [t.id, t.effect])).toEqual([
+      ["thinker", "plan"],
+      ["reviewer", "review"],
+    ]);
+    expect(defaultEnabledToolIds()).toContain("thinker");
+    expect(defaultEnabledToolIds()).toContain("reviewer");
+  });
+
+  test("resolveEnabledTools starts from defaults with no rows", () => {
+    expect(resolveEnabledTools([])).toEqual(defaultEnabledToolIds());
+  });
+
+  test("resolveEnabledTools applies stored rows over the defaults", () => {
+    const enabled = resolveEnabledTools([
+      { toolId: "write_file", enabled: false },
+      { toolId: "browser_click", enabled: true },
+    ]);
+    expect(enabled).not.toContain("write_file");
+    expect(enabled).toContain("browser_click");
+    // Untouched defaults survive.
+    expect(enabled).toContain("read_files");
+  });
+
+  test("resolveEnabledTools ignores unknown ids from older catalogs", () => {
+    const enabled = resolveEnabledTools([
+      { toolId: "does_not_exist", enabled: true },
+    ]);
+    expect(enabled).toEqual(defaultEnabledToolIds());
+  });
+
+  test("toolDirectives follows catalog order and drops unknown ids", () => {
+    const directives = toolDirectives(["reviewer", "read_files", "nope"]);
+    expect(directives).toHaveLength(2);
+    expect(directives[0]).toBe(findTool("read_files")!.directive);
+    expect(directives[1]).toBe(findTool("reviewer")!.directive);
+    expect(toolDirectives([])).toEqual([]);
+  });
+
+  test("hasTool is an exact id check", () => {
+    expect(hasTool(["thinker", "reviewer"], "thinker")).toBe(true);
+    expect(hasTool(["thinker"], "think")).toBe(false);
+    expect(hasTool([], "thinker")).toBe(false);
   });
 });
 

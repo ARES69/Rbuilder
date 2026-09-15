@@ -110,6 +110,9 @@ const schema = defineSchema(
       userId: v.id("users"),
       skillId: v.string(),
       enabled: v.boolean(),
+      // Discriminator: rows created by the Tools tab carry `kind: "tool"` and
+      // store the tool id in `skillId`. Missing = a skill row.
+      kind: v.optional(v.union(v.literal("skill"), v.literal("tool"))),
       custom: v.optional(
         v.object({
           name: v.string(),

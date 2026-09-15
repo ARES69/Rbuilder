@@ -2,6 +2,11 @@ import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 import { getModel } from "../lib/models";
+import {
+  defaultEnabledToolIds,
+  hasTool,
+  toolDirectives,
+} from "../lib/tools";
 
 /**
  * Any OpenAI-compatible endpoint works here — critical for RF users:
@@ -128,8 +133,13 @@ export const run = action({
     attachmentIds: v.optional(v.array(v.id("attachments"))),
     /** Enabled skill prompt modules (from the Skills tab). */
     skillPrompts: v.optional(v.array(v.string())),
+    /** Enabled tool ids (from the Tools tab). */
+    toolIds: v.optional(v.array(v.string())),
   },
-  handler: async (ctx, { prompt, modelId, previousHtml, attachmentIds, skillPrompts }) => {
+  handler: async (
+    ctx,
+    { prompt, modelId, previousHtml, attachmentIds, skillPrompts, toolIds },
+  ) => {
     const user = await ctx.runQuery(api.users.currentUser);
     if (!user) throw new Error("Not authenticated");
 
@@ -142,6 +152,17 @@ export const run = action({
       skillPrompts && skillPrompts.length > 0
         ? `\n\nENABLED SKILLS (follow strictly):\n${skillPrompts.map((s) => `- ${s}`).join("\n")}`
         : "";
+
+    // Enabled tools: directives for the prompts, plus stage toggles for the
+    // tools that own a pipeline stage (thinker → planning, reviewer → review).
+    const activeTools = toolIds ?? defaultEnabledToolIds();
+    const directives = toolDirectives(activeTools);
+    const toolsBlock =
+      directives.length > 0
+        ? `\n\nENABLED TOOLS (follow strictly):\n${directives.map((d) => `- ${d}`).join("\n")}`
+        : "";
+    const usePlanner = hasTool(activeTools, "thinker");
+    const useReviewer = hasTool(activeTools, "reviewer");
 
     // Collect text attachment contents so the model can use uploaded files.
     const attachmentContext: string[] = [];
@@ -190,22 +211,31 @@ export const run = action({
     );
     trace.push({ agent: "context", note: "mapped the request", ms: Date.now() - t0 });
 
-    // Stage 2 — planner agent
-    t0 = Date.now();
-    const plan = await callModel(
-      apiKey,
-      model.apiModel,
-      PLAN_PROMPT,
-      [
-        `Brief:\n${brief}`,
-        previousHtml
-          ? `Current app code exists (${previousHtml.length} chars) — plan only the changes.`
-          : "Brand new app — plan the full build.",
-        `Request:\n${prompt}`,
-      ].join("\n\n"),
-      500,
-    );
-    trace.push({ agent: "planner", note: "drafted the build plan", ms: Date.now() - t0 });
+    // Stage 2 — planner agent (skipped when the `thinker` tool is off)
+    let plan = "";
+    if (usePlanner) {
+      t0 = Date.now();
+      plan = await callModel(
+        apiKey,
+        model.apiModel,
+        PLAN_PROMPT,
+        [
+          `Brief:\n${brief}`,
+          previousHtml
+            ? `Current app code exists (${previousHtml.length} chars) — plan only the changes.`
+            : "Brand new app — plan the full build.",
+          `Request:\n${prompt}`,
+        ].join("\n\n"),
+        500,
+      );
+      trace.push({
+        agent: "planner",
+        note: "drafted the build plan",
+        ms: Date.now() - t0,
+      });
+    } else {
+      trace.push({ agent: "planner", note: "skipped (thinker off)", ms: 0 });
+    }
 
     // Stage 3 — builder agent
     t0 = Date.now();
@@ -214,7 +244,7 @@ export const run = action({
         ? `Attached files:\n${attachmentContext.join("\n\n")}`
         : null,
       `Brief:\n${brief}`,
-      `Plan:\n${plan}`,
+      plan ? `Plan:\n${plan}` : null,
       previousHtml
         ? `Current app code:\n${truncate(previousHtml, MAX_HTML_CHARS)}`
         : "This is a brand new app — no previous version exists yet.",
@@ -225,7 +255,7 @@ export const run = action({
     const raw = await callModel(
       apiKey,
       model.apiModel,
-      `${BUILD_PROMPT}${skillsBlock}`,
+      `${BUILD_PROMPT}${skillsBlock}${toolsBlock}`,
       buildInput,
       16000,
     );
@@ -241,11 +271,17 @@ export const run = action({
 
     // Stage 4 — reviewer agent (one repair pass when it flags problems)
     t0 = Date.now();
+    if (!useReviewer) {
+      trace.push({ agent: "reviewer", note: "skipped (reviewer off)", ms: 0 });
+      return { html: truncate(html, MAX_HTML_CHARS), demo: false, trace };
+    }
     const review = await callModel(
       apiKey,
       model.apiModel,
       REVIEW_PROMPT,
-      `Plan:\n${plan}\n\nApp HTML:\n${truncate(html, 120_000)}`,
+      [plan ? `Plan:\n${plan}` : null, `App HTML:\n${truncate(html, 120_000)}`]
+        .filter(Boolean)
+        .join("\n\n"),
       600,
     );
     if (review.trim().toUpperCase().startsWith("FIX:")) {
@@ -258,7 +294,7 @@ export const run = action({
       const repaired = await callModel(
         apiKey,
         model.apiModel,
-        `${BUILD_PROMPT}${skillsBlock}`,
+        `${BUILD_PROMPT}${skillsBlock}${toolsBlock}`,
         fixInput,
         16000,
       );
