@@ -78,14 +78,6 @@ export default function Dashboard() {
   const projects = useQuery(api.projects.list, {});
   const [selectedProjectId, setSelectedProjectId] =
     useState<Id<"projects"> | null>(null);
-  const project = useQuery(
-    api.projects.get,
-    selectedProjectId ? { projectId: selectedProjectId } : "skip",
-  );
-  const messages = useQuery(
-    api.messages.list,
-    selectedProjectId ? { projectId: selectedProjectId } : "skip",
-  );
 
   const [input, setInput] = useState("");
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
@@ -100,12 +92,19 @@ export default function Dashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Default to the most recent project once the list arrives.
-  useEffect(() => {
-    if (!selectedProjectId && projects && projects.length > 0) {
-      setSelectedProjectId(projects[0]._id);
-    }
-  }, [projects, selectedProjectId]);
+  // Effective selection: the explicit pick when set, otherwise the most
+  // recent project. Derived during render — no state-sync effect needed.
+  const effectiveProjectId =
+    selectedProjectId ?? (projects?.length ? projects[0]._id : null);
+
+  const projectDetail = useQuery(
+    api.projects.get,
+    effectiveProjectId ? { projectId: effectiveProjectId } : "skip",
+  );
+  const messages = useQuery(
+    api.messages.list,
+    effectiveProjectId ? { projectId: effectiveProjectId } : "skip",
+  );
 
   // Keep chat scrolled to the latest message.
   useEffect(() => {
@@ -113,9 +112,9 @@ export default function Dashboard() {
   }, [messages?.length, generating]);
 
   const selectedProject = useMemo(() => {
-    if (project) return project;
-    return projects?.find((p) => p._id === selectedProjectId) ?? null;
-  }, [project, projects, selectedProjectId]);
+    if (projectDetail) return projectDetail;
+    return projects?.find((p) => p._id === effectiveProjectId) ?? null;
+  }, [projectDetail, projects, effectiveProjectId]);
 
   const sendMessage = useMutation(api.messages.send);
   const commitBuild = useMutation(api.builds.commit);
@@ -154,8 +153,8 @@ export default function Dashboard() {
   };
 
   const handleDeleteProject = async () => {
-    if (!selectedProjectId) return;
-    const deletedId = selectedProjectId;
+    if (!effectiveProjectId) return;
+    const deletedId = effectiveProjectId;
     setSelectedProjectId(null);
     try {
       await convex.mutation(api.projects.remove, { projectId: deletedId });
@@ -185,7 +184,7 @@ export default function Dashboard() {
     setMobileTab("preview");
 
     try {
-      let projectId = selectedProjectId;
+      let projectId = effectiveProjectId;
       if (!projectId) {
         projectId = await convex.mutation(api.projects.create, {
           name: "Untitled app",
@@ -396,8 +395,8 @@ export default function Dashboard() {
             <ModelPicker
               value={selectedProject?.model ?? pendingModel}
               onChange={(id) => {
-                if (selectedProjectId) {
-                  void setModelMutation({ projectId: selectedProjectId, model: id });
+                if (effectiveProjectId) {
+                  void setModelMutation({ projectId: effectiveProjectId, model: id });
                 } else {
                   setPendingModel(id);
                 }
@@ -517,8 +516,8 @@ export default function Dashboard() {
         ) : workspaceTab === "code" ? (
           <CodePanel html={selectedProject?.html} />
         ) : workspaceTab === "data" ? (
-          selectedProjectId ? (
-            <DataPanel projectId={selectedProjectId} />
+          effectiveProjectId ? (
+            <DataPanel projectId={effectiveProjectId} />
           ) : (
             <PanelEmpty text="Create a project to browse its data." />
           )

@@ -26,12 +26,10 @@ export function WorkspaceTabs({
   value,
   onChange,
   version,
-  hasHtml,
 }: {
   value: WorkspaceTab;
   onChange: (tab: WorkspaceTab) => void;
   version?: number;
-  hasHtml?: boolean;
 }) {
   const status = useQuery(api.settings.status, {});
   return (
