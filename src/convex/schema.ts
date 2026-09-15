@@ -103,6 +103,32 @@ const schema = defineSchema(
       event: v.string(), // e.g. "crm.lead.add"
       payload: v.any(),
     }).index("by_connection", ["connectionId"]),
+
+    // Agent skills: per-user toggles for built-in skills and stored custom
+    // skills (vendor-neutral prompt modules injected into the pipeline)
+    userSkills: defineTable({
+      userId: v.id("users"),
+      skillId: v.string(),
+      enabled: v.boolean(),
+      custom: v.optional(
+        v.object({
+          name: v.string(),
+          desc: v.string(),
+          prompt: v.string(),
+          category: v.union(
+            v.literal("design"),
+            v.literal("code"),
+            v.literal("data"),
+            v.literal("integration"),
+            v.literal("quality"),
+          ),
+          source: v.optional(v.string()),
+          compatibleModels: v.optional(v.array(v.string())),
+        }),
+      ),
+    })
+      .index("by_user", ["userId"])
+      .index("by_user_skill", ["userId", "skillId"]),
   },
   {
     schemaValidation: false,

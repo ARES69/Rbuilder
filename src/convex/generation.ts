@@ -118,14 +118,22 @@ export const run = action({
     modelId: v.optional(v.string()),
     previousHtml: v.optional(v.string()),
     attachmentIds: v.optional(v.array(v.id("attachments"))),
+    /** Enabled skill prompt modules (from the Skills tab). */
+    skillPrompts: v.optional(v.array(v.string())),
   },
-  handler: async (ctx, { prompt, modelId, previousHtml, attachmentIds }) => {
+  handler: async (ctx, { prompt, modelId, previousHtml, attachmentIds, skillPrompts }) => {
     const user = await ctx.runQuery(api.users.currentUser);
     if (!user) throw new Error("Not authenticated");
 
     const model = getModel(modelId);
     const apiKey = process.env.OPENAI_API_KEY;
     const trace: TraceEntry[] = [];
+
+    // Enabled skills are appended to the builder instructions
+    const skillsBlock =
+      skillPrompts && skillPrompts.length > 0
+        ? `\n\nENABLED SKILLS (follow strictly):\n${skillPrompts.map((s) => `- ${s}`).join("\n")}`
+        : "";
 
     // Collect text attachment contents so the model can use uploaded files.
     const attachmentContext: string[] = [];
@@ -209,7 +217,7 @@ export const run = action({
     const raw = await callModel(
       apiKey,
       model.apiModel,
-      BUILD_PROMPT,
+      `${BUILD_PROMPT}${skillsBlock}`,
       buildInput,
       16000,
     );
@@ -242,7 +250,7 @@ export const run = action({
       const repaired = await callModel(
         apiKey,
         model.apiModel,
-        BUILD_PROMPT,
+        `${BUILD_PROMPT}${skillsBlock}`,
         fixInput,
         16000,
       );

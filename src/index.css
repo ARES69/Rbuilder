@@ -42,6 +42,41 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* Tomorrow Light Blue — crisp light theme with a blue accent */
+.theme-tomorrow {
+  --background: oklch(0.984 0.006 236);
+  --foreground: oklch(0.23 0.03 255);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.23 0.03 255);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.23 0.03 255);
+  --primary: oklch(0.62 0.14 245);
+  --primary-foreground: oklch(0.99 0.005 240);
+  --secondary: oklch(0.955 0.012 235);
+  --secondary-foreground: oklch(0.28 0.04 250);
+  --muted: oklch(0.952 0.01 235);
+  --muted-foreground: oklch(0.52 0.03 248);
+  --accent: oklch(0.935 0.025 233);
+  --accent-foreground: oklch(0.28 0.05 250);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.9 0.015 235);
+  --input: oklch(0.9 0.015 235);
+  --ring: oklch(0.62 0.14 245);
+  --chart-1: oklch(0.62 0.14 245);
+  --chart-2: oklch(0.646 0.222 41.116);
+  --chart-3: oklch(0.6 0.118 184.704);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.398 0.07 227.392);
+  --sidebar: oklch(0.972 0.01 236);
+  --sidebar-foreground: oklch(0.23 0.03 255);
+  --sidebar-primary: oklch(0.62 0.14 245);
+  --sidebar-primary-foreground: oklch(0.99 0.005 240);
+  --sidebar-accent: oklch(0.92 0.03 233);
+  --sidebar-accent-foreground: oklch(0.28 0.05 250);
+  --sidebar-border: oklch(0.9 0.015 235);
+  --sidebar-ring: oklch(0.62 0.14 245);
+}
+
 /* CHANGE VALUES FOR THEME — Minimalism */
 :root {
   --radius: 0.5rem;
@@ -128,5 +163,13 @@
   ::selection {
     background: oklch(0.145 0 0);
     color: oklch(0.985 0 0);
+  }
+  .theme-tomorrow ::selection {
+    background: oklch(0.62 0.14 245);
+    color: oklch(0.99 0.005 240);
+  }
+  .dark ::selection {
+    background: oklch(0.922 0 0);
+    color: oklch(0.205 0 0);
   }
 }

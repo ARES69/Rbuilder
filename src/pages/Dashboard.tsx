@@ -17,6 +17,8 @@ import {
   IntegrationsPanel,
   UiComponentsPanel,
 } from "@/components/workspace-panels";
+import { SkillsPanel } from "@/components/skills-panel";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -113,6 +115,7 @@ export default function Dashboard() {
     api.messages.list,
     effectiveProjectId ? { projectId: effectiveProjectId } : "skip",
   );
+  const enabledSkillPrompts = useQuery(api.skills.enabledPrompts, {});
 
   // Keep chat scrolled to the latest message.
   useEffect(() => {
@@ -247,6 +250,10 @@ export default function Dashboard() {
         modelId: model.id,
         previousHtml: previous?.html ?? undefined,
         attachmentIds: attachmentIds.length ? attachmentIds : undefined,
+        skillPrompts:
+          enabledSkillPrompts && enabledSkillPrompts.length > 0
+            ? enabledSkillPrompts
+            : undefined,
       });
 
       await commitBuild({
@@ -539,6 +546,8 @@ export default function Dashboard() {
           )
         ) : workspaceTab === "keys" ? (
           <ApiKeysPanel />
+        ) : workspaceTab === "skills" ? (
+          <SkillsPanel activeModelId={activeModel.id} />
         ) : workspaceTab === "integrations" ? (
           <IntegrationsPanel />
         ) : (
@@ -649,6 +658,7 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-1">
+          <ThemeToggle />
           <span className="mr-1 hidden text-xs text-muted-foreground/70 sm:block">
             {user?.email ?? "Guest"}
           </span>

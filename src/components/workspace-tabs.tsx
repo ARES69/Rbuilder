@@ -11,12 +11,14 @@ export type WorkspaceTab =
   | "data"
   | "keys"
   | "integrations"
+  | "skills"
   | "ui";
 
 const TABS: { value: WorkspaceTab; label: string }[] = [
   { value: "preview", label: "Preview" },
   { value: "code", label: "Code" },
   { value: "data", label: "Data" },
+  { value: "skills", label: "Skills" },
   { value: "keys", label: "API keys" },
   { value: "integrations", label: "Integrations" },
   { value: "ui", label: "UI components" },
