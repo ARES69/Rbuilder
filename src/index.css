@@ -147,6 +147,43 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Tomorrow Dark Blue — adapted from the "Dark+ Blue" VS Code theme.
+   Defined after .dark so it also wins when both classes are applied. */
+.theme-tomorrow-dark,
+.dark.theme-tomorrow-dark {
+  --background: #0f1951;          /* panel.background */
+  --foreground: #ffffff;          /* editor.foreground */
+  --card: #131c52;                /* editor.background */
+  --card-foreground: #ffffff;
+  --popover: #110b2f;             /* menu.background */
+  --popover-foreground: #cccccc;  /* menu.foreground */
+  --primary: #bbdaff;             /* focusBorder / badge.background */
+  --primary-foreground: #001733;  /* badge.foreground */
+  --secondary: #153360;           /* input.background */
+  --secondary-foreground: #ffffff;
+  --muted: #153360;               /* input.background */
+  --muted-foreground: #aab4d4;    /* dimmed blue-tinted foreground (placeholder #a6a6a6) */
+  --accent: #00346e;              /* editor.lineHighlightBackground */
+  --accent-foreground: #ffffff;
+  --destructive: #f44747;         /* invalid / token.error-token */
+  --border: #404f7d;              /* editorGroup.border */
+  --input: #404f7d;               /* widget divider */
+  --ring: #bbdaff;                /* focusBorder */
+  --chart-1: #569cd6;             /* keyword blue */
+  --chart-2: #4ec9b0;             /* type teal */
+  --chart-3: #dcdcaa;             /* function yellow */
+  --chart-4: #c586c0;             /* control purple */
+  --chart-5: #ce9178;             /* string orange */
+  --sidebar: #001240;             /* sideBar.background */
+  --sidebar-foreground: #cccccc;  /* menu.foreground */
+  --sidebar-primary: #bbdaff;
+  --sidebar-primary-foreground: #001733;
+  --sidebar-accent: rgba(255, 255, 255, 0.19);  /* list.hoverBackground #ffffff30 */
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(204, 204, 204, 0.2);   /* sideBarSectionHeader.border #cccccc33 */
+  --sidebar-ring: #bbdaff;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -171,5 +208,9 @@
   .dark ::selection {
     background: oklch(0.922 0 0);
     color: oklch(0.205 0 0);
+  }
+  .theme-tomorrow-dark ::selection {
+    background: #003f8e;          /* editor.selectionBackground */
+    color: #ffffff;
   }
 }

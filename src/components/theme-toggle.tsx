@@ -7,18 +7,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { THEMES, useTheme, type ThemeId } from "@/lib/theme";
-import { Check, Moon, Palette, Sun, SunMoon } from "lucide-react";
+import { Check, Moon, MoonStar, Sun, SunMoon } from "lucide-react";
 
 const ICONS: Record<ThemeId, typeof Sun> = {
   light: Sun,
   dark: Moon,
   tomorrow: SunMoon,
+  "tomorrow-dark": MoonStar,
 };
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
-  const ActiveIcon =
-    theme === "dark" ? Moon : theme === "tomorrow" ? Palette : Sun;
+  const ActiveIcon = ICONS[theme];
 
   return (
     <DropdownMenu>

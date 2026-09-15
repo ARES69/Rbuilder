@@ -7,30 +7,38 @@ import {
   type ReactNode,
 } from "react";
 
-export type ThemeId = "light" | "dark" | "tomorrow";
+export type ThemeId = "light" | "dark" | "tomorrow" | "tomorrow-dark";
 
 export const THEMES: { id: ThemeId; label: string; hint: string }[] = [
   { id: "light", label: "Светлая", hint: "Минималистичный белый" },
   { id: "dark", label: "Тёмная", hint: "Монохромная тёмная" },
   { id: "tomorrow", label: "Tomorrow Light Blue", hint: "Голубой акцент" },
+  { id: "tomorrow-dark", label: "Tomorrow Dark Blue", hint: "Deep+ Blue (VS Code)" },
 ];
+
+const THEME_IDS = new Set<ThemeId>(THEMES.map((t) => t.id));
 
 const STORAGE_KEY = "rbuilder-theme";
 
 function readInitialTheme(): ThemeId {
   if (typeof window === "undefined") return "light";
   const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === "light" || stored === "dark" || stored === "tomorrow") {
-    return stored;
+  if (stored && THEME_IDS.has(stored as ThemeId)) {
+    return stored as ThemeId;
   }
   return "light";
 }
 
 function applyTheme(theme: ThemeId) {
   const root = document.documentElement;
-  root.classList.remove("dark", "theme-tomorrow");
+  root.classList.remove("dark", "theme-tomorrow", "theme-tomorrow-dark");
   if (theme === "dark") root.classList.add("dark");
   if (theme === "tomorrow") root.classList.add("theme-tomorrow");
+  if (theme === "tomorrow-dark") {
+    // `dark` keeps dark: utility variants in the UI kit working,
+    // `theme-tomorrow-dark` overrides the tokens with the Dark+ Blue palette.
+    root.classList.add("dark", "theme-tomorrow-dark");
+  }
 }
 
 const ThemeContext = createContext<{

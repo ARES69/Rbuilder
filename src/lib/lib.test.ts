@@ -4,6 +4,7 @@ import { BUILT_IN_SKILLS, parseCustomSkill, SKILL_CATEGORIES } from "./skills";
 import { STARTER_TEMPLATES } from "./templates";
 import { CAPABILITIES } from "./capabilities";
 import { RU_SERVICES, SERVICE_CATEGORIES, findService } from "./ru-services";
+import { THEMES } from "./theme";
 
 /* --------------------------------- models -------------------------------- */
 
@@ -115,6 +116,30 @@ describe("capabilities", () => {
     for (const capability of CAPABILITIES) {
       expect(capability.starter.trim().endsWith(":")).toBe(true);
     }
+  });
+});
+
+/* -------------------------------- themes --------------------------------- */
+
+describe("themes", () => {
+  test("catalog has unique ids with labels and hints", () => {
+    const ids = new Set(THEMES.map((t) => t.id));
+    expect(ids.size).toBe(THEMES.length);
+    for (const theme of THEMES) {
+      expect(theme.label.length).toBeGreaterThan(0);
+      expect(theme.hint.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("all four themes are present, including Tomorrow Dark Blue", () => {
+    expect(THEMES.map((t) => t.id)).toEqual([
+      "light",
+      "dark",
+      "tomorrow",
+      "tomorrow-dark",
+    ]);
+    const darkBlue = THEMES.find((t) => t.id === "tomorrow-dark");
+    expect(darkBlue!.label).toBe("Tomorrow Dark Blue");
   });
 });
 
