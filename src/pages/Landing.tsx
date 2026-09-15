@@ -14,18 +14,18 @@ import { useNavigate } from "react-router";
 const features = [
   {
     icon: MessageSquareText,
-    title: "Describe. Done.",
-    body: "Plain language in. A working web app out — rebuilt live on every prompt.",
+    title: "Опиши — и готово",
+    body: "Обычным языком. На выходе — работающее веб-приложение, пересобираемое после каждого запроса.",
   },
   {
     icon: Paperclip,
-    title: "Bring your files",
-    body: "Attach anything. The agent reads it and folds it into the build.",
+    title: "Прикрепляйте файлы",
+    body: "Приложите что угодно: агент прочитает файл и встроит его в сборку.",
   },
   {
     icon: Monitor,
-    title: "See it instantly",
-    body: "A live preview sits beside the chat and updates as you work.",
+    title: "Видно сразу",
+    body: "Живой предпросмотр рядом с чатом обновляется по мере работы.",
   },
 ];
 
@@ -46,7 +46,8 @@ export default function Landing() {
           <div className="flex items-center gap-2.5">
             <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <Sparkles className="size-3.5" />
-            </span>            <span className="text-sm font-semibold tracking-tight">RBuilder</span>
+            </span>
+            <span className="text-sm font-semibold tracking-tight">RBuilder</span>
           </div>
           <nav className="flex items-center gap-1">
             {isLoading ? null : isAuthenticated ? (
@@ -56,7 +57,7 @@ export default function Landing() {
                 className="text-muted-foreground"
                 onClick={() => navigate("/dashboard")}
               >
-                Open app
+                Открыть приложение
               </Button>
             ) : (
               <Button
@@ -65,7 +66,7 @@ export default function Landing() {
                 className="text-muted-foreground"
                 onClick={() => navigate("/auth")}
               >
-                Sign in
+                Войти
               </Button>
             )}
           </nav>
@@ -85,15 +86,15 @@ export default function Landing() {
               variant="outline"
               className="rounded-full border-border/80 font-normal text-muted-foreground"
             >
-              Version 1 — chat + live preview
+              Версия 1 — чат + живой предпросмотр
             </Badge>
             <h1 className="mt-6 text-5xl font-semibold tracking-tight text-balance md:text-6xl">
-              Build a web app from a single chat.
+              Приложение из одного чата.
             </h1>
             <p className="mt-6 max-w-xl text-base leading-7 text-muted-foreground md:text-lg">
-              RBuilder turns a prompt — and any files you attach — into a
-              running application, rendered next to the conversation the moment
-              it is written. Completely free, no subscription, no credits.
+              RBuilder превращает запрос — и любые прикреплённые файлы — в
+              работающее приложение, которое появляется рядом с диалогом сразу
+              после сборки. Полностью бесплатно: без подписки и кредитов.
             </p>
             <div className="mt-10 flex items-center gap-3">
               <Button
@@ -103,7 +104,7 @@ export default function Landing() {
                   navigate(isAuthenticated ? "/dashboard" : "/auth")
                 }
               >
-                {isAuthenticated ? "Open your workspace" : "Start building"}
+                {isAuthenticated ? "Открыть воркспейс" : "Начать сборку"}
                 <ArrowRight className="ml-1 size-4" />
               </Button>
               <Button
@@ -112,7 +113,7 @@ export default function Landing() {
                 className="h-11 rounded-md px-6 text-sm font-medium text-muted-foreground"
                 onClick={() => navigate("/auth")}
               >
-                Sign in
+                Войти
               </Button>
             </div>
           </motion.div>
@@ -143,7 +144,7 @@ export default function Landing() {
                 <div className="flex h-full min-h-56 flex-col items-center justify-center rounded-md border border-dashed border-border/70">
                   <Monitor className="size-5 text-muted-foreground/60" />
                   <span className="mt-2 text-xs text-muted-foreground/70">
-                    live preview
+                    живой предпросмотр
                   </span>
                 </div>
               </div>
@@ -164,6 +165,18 @@ export default function Landing() {
               </div>
             ))}
           </div>
+
+          {/* RF-specific: integrations highlight */}
+          <div className="mt-12 rounded-lg border border-border/80 bg-card p-6">
+            <h3 className="text-sm font-semibold tracking-tight">
+              Интеграции с российскими сервисами
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Битрикс24, 1С, amoCRM, ЮKassa, Т-Банк, СДЭК, Boxberry, DaData,
+              Telegram, VK, SMS Aero, Диадок, Яндекс Диск — подключаются прямо
+              во вкладке «Интеграции», ключи хранятся только на сервере.
+            </p>
+          </div>
         </section>
 
         {/* Bottom CTA */}
@@ -171,10 +184,11 @@ export default function Landing() {
           <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-6 px-6 py-16 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-xl font-semibold tracking-tight">
-                Completely free. No subscription, no credits, no API key needed.
+                Полностью бесплатно. Без подписки, кредитов и обязательных
+                ключей.
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Sign in and start with your first prompt.
+                Войдите и начните с первого запроса.
               </p>
             </div>
             <Button
@@ -182,7 +196,7 @@ export default function Landing() {
               className="h-11 rounded-md px-6 text-sm font-medium"
               onClick={() => navigate(isAuthenticated ? "/dashboard" : "/auth")}
             >
-              Get started
+              Начать
               <ArrowRight className="ml-1 size-4" />
             </Button>
           </div>
@@ -192,7 +206,7 @@ export default function Landing() {
       <footer className="border-t border-border/70">
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-6 text-xs text-muted-foreground">
           <span>© {new Date().getFullYear()} RBuilder</span>
-          <span>The free coding agent</span>
+          <span>Бесплатный ИИ-агент для сборки приложений</span>
         </div>
       </footer>
     </motion.div>

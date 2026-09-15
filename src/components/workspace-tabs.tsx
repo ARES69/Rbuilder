@@ -15,13 +15,13 @@ export type WorkspaceTab =
   | "ui";
 
 const TABS: { value: WorkspaceTab; label: string }[] = [
-  { value: "preview", label: "Preview" },
-  { value: "code", label: "Code" },
-  { value: "data", label: "Data" },
-  { value: "skills", label: "Skills" },
-  { value: "keys", label: "API keys" },
-  { value: "integrations", label: "Integrations" },
-  { value: "ui", label: "UI components" },
+  { value: "preview", label: "Превью" },
+  { value: "code", label: "Код" },
+  { value: "data", label: "Данные" },
+  { value: "skills", label: "Навыки" },
+  { value: "keys", label: "API-ключи" },
+  { value: "integrations", label: "Интеграции" },
+  { value: "ui", label: "UI-компоненты" },
 ];
 
 export function WorkspaceTabs({
@@ -66,7 +66,7 @@ export function WorkspaceTabs({
             variant="outline"
             className="h-5 rounded-full px-1.5 text-[10px] font-normal text-amber-600"
           >
-            demo mode
+            демо-режим
           </Badge>
         ) : null}
       </div>

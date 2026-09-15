@@ -12,6 +12,10 @@ export const status = query({
     return {
       authenticated: !!user,
       aiKey: !!process.env.OPENAI_API_KEY,
+      // Not a secret: the OpenAI-compatible endpoint the pipeline calls.
+      // RF users can point it at DeepSeek / GLM (rubles, no foreign card).
+      aiBaseUrl:
+        (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
       integrationKey: !!process.env.VLY_INTEGRATION_KEY,
       emailKey: !!process.env.RESEND_API_KEY,
       paymentsKey: !!process.env.STRIPE_SECRET_KEY,

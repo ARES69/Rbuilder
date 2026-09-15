@@ -30,7 +30,7 @@ export function CodePanel({ html }: { html: string | undefined }) {
     return (
       <Empty
         icon={Code2}
-        hint="Build something first — the generated source appears here."
+        hint="Сначала создайте что-нибудь — здесь появится сгенерированный исходный код."
       />
     );
   }
@@ -52,13 +52,13 @@ export function CodePanel({ html }: { html: string | undefined }) {
             onClick={() => {
               void navigator.clipboard.writeText(html).then(() => {
                 setCopied(true);
-                toast.success("Source copied to clipboard");
+                toast.success("Исходный код скопирован");
                 setTimeout(() => setCopied(false), 1500);
               });
             }}
           >
             {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-            Copy
+            Копировать
           </Button>
         </div>
       </div>
@@ -95,7 +95,7 @@ export function DataPanel({ projectId }: { projectId: Id<"projects"> }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PanelHeader label="Data" hint="live database records" />
+      <PanelHeader label="Данные" hint="живые записи базы" />
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-6 p-4 pt-1">
           <section>
@@ -107,9 +107,9 @@ export function DataPanel({ projectId }: { projectId: Id<"projects"> }) {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-border/70 bg-muted/40">
-                    <th className="px-3 py-1.5 font-medium text-muted-foreground">role</th>
-                    <th className="px-3 py-1.5 font-medium text-muted-foreground">content</th>
-                    <th className="px-3 py-1.5 font-medium text-muted-foreground">trace</th>
+                    <th className="px-3 py-1.5 font-medium text-muted-foreground">роль</th>
+                    <th className="px-3 py-1.5 font-medium text-muted-foreground">содержимое</th>
+                    <th className="px-3 py-1.5 font-medium text-muted-foreground">трасса</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -125,14 +125,14 @@ export function DataPanel({ projectId }: { projectId: Id<"projects"> }) {
                             <div className="truncate">{message.content}</div>
                           </td>
                           <td className="px-3 py-1.5 align-top text-muted-foreground">
-                            {message.trace ? `${message.trace.length} steps` : "—"}
+                            {message.trace ? `${message.trace.length} шагов` : "—"}
                           </td>
                         </tr>
                       ))
                     : (
                         <tr>
                           <td colSpan={3} className="px-3 py-3 text-muted-foreground">
-                            No messages yet
+                            Пока нет сообщений
                           </td>
                         </tr>
                       )}
@@ -150,9 +150,9 @@ export function DataPanel({ projectId }: { projectId: Id<"projects"> }) {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-border/70 bg-muted/40">
-                    <th className="px-3 py-1.5 font-medium text-muted-foreground">name</th>
-                    <th className="px-3 py-1.5 font-medium text-muted-foreground">size</th>
-                    <th className="px-3 py-1.5 font-medium text-muted-foreground">uploaded</th>
+                    <th className="px-3 py-1.5 font-medium text-muted-foreground">имя</th>
+                    <th className="px-3 py-1.5 font-medium text-muted-foreground">размер</th>
+                    <th className="px-3 py-1.5 font-medium text-muted-foreground">загружен</th>
                     <th className="px-3 py-1.5" />
                   </tr>
                 </thead>
@@ -174,7 +174,7 @@ export function DataPanel({ projectId }: { projectId: Id<"projects"> }) {
                               className="h-6 gap-1 px-2 text-xs text-muted-foreground"
                               onClick={() => void removeAttachment({ attachmentId: attachment._id })}
                             >
-                              Delete
+                              Удалить
                             </Button>
                           </td>
                         </tr>
@@ -182,7 +182,7 @@ export function DataPanel({ projectId }: { projectId: Id<"projects"> }) {
                     : (
                         <tr>
                           <td colSpan={4} className="px-3 py-3 text-muted-foreground">
-                            No attachments yet
+                            Пока нет файлов
                           </td>
                         </tr>
                       )}
@@ -208,21 +208,26 @@ export function ApiKeysPanel() {
     );
   }
   const keys = [
-    { key: "OPENAI_API_KEY", purpose: "Model access for the build pipeline", set: status.aiKey },
+    { key: "OPENAI_API_KEY", purpose: "Доступ к моделям для конвейера сборки", set: status.aiKey },
+    {
+      key: "OPENAI_BASE_URL",
+      purpose: `Переопределение провайдера — подойдёт любой OpenAI-совместимый API (например https://api.deepseek.com/v1, оплата в рублях). Сейчас: ${status.aiBaseUrl}`,
+      set: status.aiBaseUrl !== "https://api.openai.com/v1",
+    },
     {
       key: "VLY_INTEGRATION_KEY",
-      purpose: "Managed AI / email / payments gateway (auto-injected)",
+      purpose: "Управляемый шлюз AI / почта / платежи (подключён автоматически)",
       set: status.integrationKey,
     },
   ];
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PanelHeader label="API keys" hint="server-side only" />
+      <PanelHeader label="API-ключи" hint="только на сервере" />
       <div className="min-h-0 flex-1 overflow-y-auto p-4 pt-1">
         <p className="mb-4 text-xs leading-5 text-muted-foreground">
-          Keys are set in the project&apos;s Keys / API keys tab and read
-          server-side only. This panel shows what is currently available —
-          values are never exposed to the client.
+          Ключи задаются во вкладке API-ключей проекта и читаются только на
+          сервере. Панель показывает, что доступно сейчас — значения никогда
+          не покидают бэкенд.
         </p>
         <div className="flex flex-col gap-2">
           {keys.map((entry) => (
@@ -242,7 +247,7 @@ export function ApiKeysPanel() {
                     entry.set ? "border-foreground/30" : "text-muted-foreground",
                   )}
                 >
-                  {entry.set ? "configured" : "not set"}
+                  {entry.set ? "задан" : "не задан"}
                 </Badge>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground">{entry.purpose}</p>
@@ -301,21 +306,21 @@ export function UiComponentsPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PanelHeader label="UI components" hint="shadcn/ui · 45 installed" />
+      <PanelHeader label="UI-компоненты" hint="shadcn/ui · 45 установлено" />
       <div className="border-b border-border/70 px-4 py-2">
         <div className="relative">
           <Search className="absolute top-2.5 left-2.5 size-3.5 text-muted-foreground/60" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search components…"
+            placeholder="Поиск компонентов…"
             className="h-8 bg-card pl-8 text-xs"
           />
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4 pt-3">
         {groups.size === 0 ? (
-          <p className="text-xs text-muted-foreground">No matches</p>
+          <p className="text-xs text-muted-foreground">Ничего не найдено</p>
         ) : (
           [...groups.entries()].map(([group, names]) => (
             <section key={group} className="mb-4 last:mb-0">

@@ -3,7 +3,15 @@ import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 import { getModel } from "../lib/models";
 
-const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+/**
+ * Any OpenAI-compatible endpoint works here — critical for RF users:
+ * DeepSeek (api.deepseek.com/v1), GLM (open.bigmodel.cn/api/paas/v4),
+ * GigaChat-compat proxies, local gateways, etc. Billing in rubles,
+ * no foreign card needed. Only the path `/chat/completions` is appended.
+ */
+const OPENAI_BASE_URL =
+  (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, "");
+const OPENAI_CHAT_URL = `${OPENAI_BASE_URL}/chat/completions`;
 const MAX_ATTACHMENT_CHARS = 12_000;
 const MAX_HTML_CHARS = 400_000;
 
@@ -47,14 +55,14 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** Deterministic fallback app shown when no OPENAI_API_KEY is configured. */
+/** Deterministic fallback app shown when no model API key is configured. */
 function fallbackHtml(prompt: string): string {
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Preview</title>
+<title>Предпросмотр</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background: #fafafa; color: #171717;
@@ -69,8 +77,8 @@ function fallbackHtml(prompt: string): string {
 </head>
 <body>
   <div class="card">
-    <h1>Your app preview</h1>
-    <p>This sandbox renders exactly what the agent pipeline writes — a single self-contained HTML file, rebuilt live on every prompt. Generation is running in demo mode; add an <code>OPENAI_API_KEY</code> in the API keys tab to run the full multi-agent build. RBuilder is completely free.</p>
+    <h1>Предпросмотр приложения</h1>
+    <p>Здесь рендерится ровно то, что пишет конвейер агентов — один самодостаточный HTML-файл, пересобираемый после каждого запроса. Сейчас работает демо-режим: добавьте <code>OPENAI_API_KEY</code> (или любой совместимый провайдер через <code>OPENAI_BASE_URL</code>, например DeepSeek) во вкладке «API-ключи», и каждый билд станет настоящим приложением. RBuilder полностью бесплатен.</p>
     <div class="prompt">${escapeHtml(prompt)}</div>
   </div>
 </body>
