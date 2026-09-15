@@ -16,9 +16,10 @@ import {
   KeyRound,
   Loader2,
   Paperclip,
-  Plug,
   Search,
 } from "lucide-react";
+
+export { IntegrationsPanel } from "./integrations-panel";
 
 /* ------------------------------ Code panel ------------------------------ */
 
@@ -247,69 +248,6 @@ export function ApiKeysPanel() {
               <p className="mt-1 text-[11px] text-muted-foreground">{entry.purpose}</p>
             </div>
           ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* -------------------------- Integrations panel ------------------------- */
-
-const INTEGRATIONS = [
-  { name: "AI Gateway", desc: "Chat completions, streaming, embeddings — metered per use", envKey: "integrationKey" },
-  { name: "Email", desc: "Transactional email and batch sending", envKey: "emailKey" },
-  { name: "Payments", desc: "Checkout, subscriptions, payment intents", envKey: "paymentsKey" },
-  { name: "Model Access", desc: "6-model catalog with sessions (built in, free)", envKey: "aiKey" },
-  { name: "Storage", desc: "File attachments in file storage (built in, free)", envKey: null },
-  { name: "Auth", desc: "Email OTP + guest sign-in (built in, free)", envKey: null },
-];
-
-export function IntegrationsPanel() {
-  const status = useQuery(api.settings.status, {});
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <PanelHeader label="Integrations" hint={`${INTEGRATIONS.length} available`} />
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 pt-1">
-        <div className="flex flex-col gap-2">
-          {INTEGRATIONS.map((integration) => {
-            const set =
-              integration.envKey === null
-                ? true
-                : status
-                  ? Boolean(status[integration.envKey as keyof typeof status])
-                  : null;
-            return (
-              <div
-                key={integration.name}
-                className="flex items-center justify-between rounded-md border border-border/70 px-3 py-2.5"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Plug className="size-3.5 text-muted-foreground" />
-                    <span className="text-sm font-medium">{integration.name}</span>
-                  </div>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {integration.desc}
-                  </p>
-                </div>
-                <div className="ml-3 flex shrink-0 items-center">
-                  {set === null ? (
-                    <Loader2 className="size-3.5 animate-spin text-muted-foreground/50" />
-                  ) : (
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "h-5 rounded-full px-2 text-[10px] font-normal",
-                        set ? "border-foreground/30" : "text-muted-foreground",
-                      )}
-                    >
-                      {set ? "connected" : "add key"}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            );
-          })}
         </div>
       </div>
     </div>

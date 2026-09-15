@@ -77,6 +77,32 @@ const schema = defineSchema(
       day: v.string(), // YYYY-MM-DD (computed client-side)
       used: v.number(),
     }).index("by_user_day", ["userId", "day"]),
+
+    // Russian service connectors (Битрикс24, 1С, amoCRM, ЮKassa, СДЭК, …).
+    // Credentials are stored server-side only; the client never receives them.
+    serviceConnections: defineTable({
+      userId: v.id("users"),
+      serviceId: v.string(), // catalog id from lib/ru-services.ts
+      credentials: v.record(v.string(), v.string()), // field id → secret value
+      status: v.string(), // "connected" | "error"
+      statusMessage: v.optional(v.string()),
+      // Stable secret for incoming webhook URLs (/webhooks/{key})
+      webhookKey: v.optional(v.string()),
+      // Human-friendly account info, e.g. portal url (non-secret)
+      meta: v.optional(v.string()),
+      lastCheckedAt: v.optional(v.number()),
+    })
+      .index("by_user", ["userId"])
+      .index("by_user_service", ["userId", "serviceId"]),
+
+    // Events delivered by external services to the webhook endpoint
+    serviceEvents: defineTable({
+      userId: v.id("users"),
+      serviceId: v.string(),
+      connectionId: v.id("serviceConnections"),
+      event: v.string(), // e.g. "crm.lead.add"
+      payload: v.any(),
+    }).index("by_connection", ["connectionId"]),
   },
   {
     schemaValidation: false,
