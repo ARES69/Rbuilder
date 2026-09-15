@@ -16,7 +16,15 @@ import {
 
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
-import { ArrowRight, Loader2, Mail, UserX } from "lucide-react";
+import {
+  ArrowRight,
+  Loader2,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+  UserRound,
+  UserX,
+} from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -42,16 +50,23 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     searchParams.get("returnTo"),
     redirectAfterAuth,
   );
-  const [step, setStep] = useState<"signIn" | { email: string }>("signIn");
+  const [step, setStep] = useState<"signIn" | "admin" | { email: string }>(
+    "signIn",
+  );
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set after a successful admin sign-in so the admin lands on the console
+  // instead of the regular dashboard. Navigation happens in the effect below
+  // once the session is actually live, which avoids racing it.
+  const [landAdmin, setLandAdmin] = useState(false);
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
-      navigate(redirect);
+      const target = landAdmin && !searchParams.get("returnTo") ? "/admin" : redirect;
+      navigate(target);
     }
-  }, [authLoading, isAuthenticated, navigate, redirect]);
+  }, [authLoading, isAuthenticated, navigate, redirect, landAdmin, searchParams]);
   const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
@@ -93,6 +108,29 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   };
 
+  /** Admin sign-in: username + password (see convex/auth/adminCredentials.ts). */
+  const handleAdminSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    const formData = new FormData(event.currentTarget);
+    try {
+      await signIn("admin-credentials", {
+        username: formData.get("username") as string,
+        password: formData.get("password") as string,
+      });
+      // Admins land on the console unless they were sent here from a page.
+      setLandAdmin(true);
+    } catch (signInError) {
+      const message =
+        signInError instanceof Error ? signInError.message : "";
+      setError(
+        message.includes("Введите логин") ? message : "Неверный логин или пароль",
+      );
+      setIsLoading(false);
+    }
+  };
+
   const handleGuestLogin = async () => {
     setIsLoading(true);
     setError(null);
@@ -117,7 +155,81 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       <div className="flex-1 flex items-center justify-center">
         <div className="flex items-center justify-center h-full flex-col">
         <Card className="min-w-[350px] pb-0 border shadow-md">
-          {step === "signIn" ? (
+          {step === "admin" ? (
+            <>
+              <CardHeader className="text-center">
+                <div className="flex justify-center">
+                  <div className="mt-4 mb-4 flex size-16 items-center justify-center rounded-lg border border-border/70">
+                    <ShieldCheck className="size-7 text-muted-foreground" />
+                  </div>
+                </div>
+                <CardTitle className="text-xl">Вход для администратора</CardTitle>
+                <CardDescription>
+                  Логин и пароль администратора RBuilder
+                </CardDescription>
+              </CardHeader>
+              <form onSubmit={handleAdminSubmit}>
+                <CardContent className="space-y-3">
+                  <div className="relative">
+                    <UserRound className="absolute top-3 left-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      name="username"
+                      placeholder="Логин"
+                      autoComplete="username"
+                      className="pl-9"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
+                  <div className="relative">
+                    <LockKeyhole className="absolute top-3 left-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      name="password"
+                      type="password"
+                      placeholder="Пароль"
+                      autoComplete="current-password"
+                      className="pl-9"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
+                  {error && <p className="text-sm text-red-500">{error}</p>}
+                </CardContent>
+                <CardFooter className="flex-col gap-2">
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Проверяем…
+                      </>
+                    ) : (
+                      <>
+                        Войти как администратор
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="w-full text-xs text-muted-foreground"
+                    onClick={() => {
+                      setStep("signIn");
+                      setLandAdmin(false);
+                      setError(null);
+                    }}
+                    disabled={isLoading}
+                  >
+                    Обычный вход
+                  </Button>
+                </CardFooter>
+              </form>
+            </>
+          ) : step === "signIn" ? (
             <>
               <CardHeader className="text-center">
               <div className="flex justify-center">
@@ -188,6 +300,20 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     >
                       <UserX className="mr-2 h-4 w-4" />
                       Продолжить как гость
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="mt-2 w-full text-xs text-muted-foreground"
+                      onClick={() => {
+                        setStep("admin");
+                        setError(null);
+                      }}
+                      disabled={isLoading}
+                    >
+                      <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                      Вход для администратора
                     </Button>
                   </div>
                 </CardContent>

@@ -21,6 +21,7 @@ import { SkillsPanel } from "@/components/skills-panel";
 import { ToolsPanel } from "@/components/tools-panel";
 import { resolveEnabledTools } from "@/lib/tools";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -56,6 +57,7 @@ import {
   Plus,
   RefreshCw,
   SendHorizontal,
+  ShieldCheck,
   Sparkles,
   X,
 } from "lucide-react";
@@ -664,6 +666,19 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-1">
+          {user?.role === "admin" ? (
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 px-2 text-xs text-muted-foreground"
+            >
+              <Link to="/admin">
+                <ShieldCheck className="size-3.5" />
+                <span className="hidden sm:inline">Админ</span>
+              </Link>
+            </Button>
+          ) : null}
           <ThemeToggle />
           <span className="mr-1 hidden text-xs text-muted-foreground/70 sm:block">
             {user?.email ?? "Guest"}
