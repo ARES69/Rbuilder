@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { KEYLESS_LABEL } from "@/lib/research";
 import { toast } from "sonner";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -218,6 +219,13 @@ export function ApiKeysPanel() {
       key: "VLY_INTEGRATION_KEY",
       purpose: "Управляемый шлюз AI / почта / платежи (подключён автоматически)",
       set: status.integrationKey,
+    },
+    {
+      key: "EXA_API_KEY · TAVILY_API_KEY · BRAVE_API_KEY · SERPER_API_KEY",
+      purpose: status.searchProvider
+        ? `Веб-исследование (инструмент web_search). Активен провайдер: ${status.searchProvider} — конвейер берёт реальные источники и переносит их факты в билд.`
+        : `Веб-исследование (инструмент web_search). Без ключа работает бесплатный вариант: ${KEYLESS_LABEL}. Любой ключ выше включает полноценный поиск.`,
+      set: status.searchKey,
     },
   ];
   return (

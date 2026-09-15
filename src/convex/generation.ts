@@ -1,7 +1,8 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { getModel } from "../lib/models";
+import { buildResearchQuery, formatResearch } from "../lib/research";
 import {
   defaultEnabledToolIds,
   hasTool,
@@ -211,6 +212,40 @@ export const run = action({
     );
     trace.push({ agent: "context", note: "mapped the request", ms: Date.now() - t0 });
 
+    // Stage 1.5 — researcher (only when the `web_search` tool is on). Fetches
+    // real sources so the build is grounded instead of invented; `read_url`
+    // additionally reads the top result pages. Failures never break a build.
+    let research = "";
+    if (hasTool(activeTools, "web_search")) {
+      t0 = Date.now();
+      try {
+        const digest = await ctx.runAction(internal.research.search, {
+          query: buildResearchQuery(prompt),
+          readPages: hasTool(activeTools, "read_url"),
+        });
+        if (digest.sources.length > 0) {
+          research = formatResearch(digest);
+          trace.push({
+            agent: "researcher",
+            note: `${digest.provider}: ${digest.sources.length} источников`,
+            ms: Date.now() - t0,
+          });
+        } else {
+          trace.push({
+            agent: "researcher",
+            note: "источники не найдены",
+            ms: Date.now() - t0,
+          });
+        }
+      } catch {
+        trace.push({
+          agent: "researcher",
+          note: "research unavailable",
+          ms: Date.now() - t0,
+        });
+      }
+    }
+
     // Stage 2 — planner agent (skipped when the `thinker` tool is off)
     let plan = "";
     if (usePlanner) {
@@ -221,11 +256,14 @@ export const run = action({
         PLAN_PROMPT,
         [
           `Brief:\n${brief}`,
+          research ? `Web research:\n${research}` : null,
           previousHtml
             ? `Current app code exists (${previousHtml.length} chars) — plan only the changes.`
             : "Brand new app — plan the full build.",
           `Request:\n${prompt}`,
-        ].join("\n\n"),
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
         500,
       );
       trace.push({
@@ -244,6 +282,9 @@ export const run = action({
         ? `Attached files:\n${attachmentContext.join("\n\n")}`
         : null,
       `Brief:\n${brief}`,
+      research
+        ? `Web research (real sources — use these facts, prices and names instead of inventing them):\n${research}`
+        : null,
       plan ? `Plan:\n${plan}` : null,
       previousHtml
         ? `Current app code:\n${truncate(previousHtml, MAX_HTML_CHARS)}`

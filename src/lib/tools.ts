@@ -204,9 +204,9 @@ export const TOOLS: ToolDef[] = [
     name: "web_search",
     group: "web",
     origin: "freebuff",
-    desc: "Реалистичные данные предметной области",
+    desc: "Реальный поиск источников: конвейер добавляет этап исследования",
     directive:
-      "TOOL web_search: when the domain needs real-world facts, fill the app with realistic, plausible data (RU market names, ₽ prices, real city lists) rather than lorem ipsum.",
+      "TOOL web_search: the attached research notes come from a real web search — use those names, prices and facts in the app instead of inventing them, and keep them internally consistent.",
     defaultEnabled: false,
   },
   {
@@ -214,7 +214,7 @@ export const TOOLS: ToolDef[] = [
     name: "read_url",
     group: "web",
     origin: "freebuff",
-    desc: "Структура как у состоявшихся продуктов",
+    desc: "Дочитывает страницы источников целиком (глубже, но медленнее)",
     directive:
       "TOOL read_url: mirror the information architecture of established products in this domain — the sections users already expect to find.",
     defaultEnabled: false,

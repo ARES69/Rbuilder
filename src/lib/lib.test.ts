@@ -6,6 +6,16 @@ import { CAPABILITIES } from "./capabilities";
 import { RU_SERVICES, SERVICE_CATEGORIES, findService } from "./ru-services";
 import { THEMES } from "./theme";
 import {
+  KEYLESS_LABEL,
+  MAX_RESEARCH_QUERY,
+  SEARCH_PROVIDERS,
+  buildResearchQuery,
+  formatResearch,
+  isFetchableUrl,
+  pickProvider,
+  stripHtml,
+} from "./research";
+import {
   TOOLS,
   TOOL_GROUPS,
   defaultEnabledToolIds,
@@ -240,6 +250,105 @@ describe("agent tools", () => {
     expect(hasTool(["thinker", "reviewer"], "thinker")).toBe(true);
     expect(hasTool(["thinker"], "think")).toBe(false);
     expect(hasTool([], "thinker")).toBe(false);
+  });
+});
+
+/* -------------------------------- research -------------------------------- */
+
+describe("web research", () => {
+  test("provider catalog has unique ids, env vars and docs links", () => {
+    const ids = new Set(SEARCH_PROVIDERS.map((p) => p.id));
+    expect(ids.size).toBe(SEARCH_PROVIDERS.length);
+    for (const provider of SEARCH_PROVIDERS) {
+      expect(provider.envVar).toMatch(/^[A-Z0-9_]+_API_KEY$/);
+      expect(provider.docsUrl.startsWith("https://")).toBe(true);
+    }
+  });
+
+  test("pickProvider returns nothing when no key is configured", () => {
+    expect(pickProvider({})).toBeNull();
+    expect(pickProvider({ OPENAI_API_KEY: "x" })).toBeNull();
+  });
+
+  test("pickProvider honours the documented priority order", () => {
+    expect(pickProvider({ EXA_API_KEY: "a" })!.id).toBe("exa");
+    expect(pickProvider({ TAVILY_API_KEY: "b" })!.id).toBe("tavily");
+    expect(pickProvider({ BRAVE_API_KEY: "c" })!.id).toBe("brave");
+    expect(pickProvider({ SERPER_API_KEY: "d" })!.id).toBe("serper");
+    expect(
+      pickProvider({ SERPER_API_KEY: "d", EXA_API_KEY: "a" })!.id,
+    ).toBe("exa");
+  });
+
+  test("providers that return page text are marked as such", () => {
+    const withContent = SEARCH_PROVIDERS.filter((p) => p.returnsContent);
+    expect(withContent.map((p) => p.id)).toEqual(["exa", "tavily"]);
+  });
+
+  test("buildResearchQuery collapses whitespace and caps the length", () => {
+    expect(buildResearchQuery("  доставка   еды  \n москва ")).toBe(
+      "доставка еды москва",
+    );
+    const long = buildResearchQuery("x".repeat(500));
+    expect(long.length).toBeLessThanOrEqual(MAX_RESEARCH_QUERY);
+  });
+
+  test("stripHtml drops scripts, styles, tags and entities", () => {
+    const html =
+      '<div><script>bad()</script><style>.a{}</style><p>Цена&nbsp;12&nbsp;900&nbsp;₽ &amp; доставка</p></div>';
+    const text = stripHtml(html);
+    expect(text).not.toContain("bad()");
+    expect(text).not.toContain(".a{}");
+    expect(text).not.toContain("<p>");
+    expect(text).toContain("Цена 12 900 ₽ & доставка");
+  });
+
+  test("formatResearch renders provider, query and numbered sources", () => {
+    const text = formatResearch({
+      provider: "Exa",
+      keyless: false,
+      query: "доставка еды",
+      answer: "Ответ",
+      sources: [
+        { title: "СДЭК", url: "https://cdek.ru", text: "Тарифы" },
+        { title: "Boxberry", url: "https://boxberry.ru" },
+      ],
+    });
+    expect(text).toContain("Provider: Exa");
+    expect(text).toContain("Query: доставка еды");
+    expect(text).toContain("1. СДЭК — https://cdek.ru");
+    expect(text).toContain("2. Boxberry — https://boxberry.ru");
+    expect(text).not.toContain("keyless fallback");
+  });
+
+  test("formatResearch marks the keyless fallback and truncates", () => {
+    const keyless = formatResearch({
+      provider: KEYLESS_LABEL,
+      keyless: true,
+      query: "q",
+      sources: [{ title: "t", url: "https://example.com" }],
+    });
+    expect(keyless).toContain("(keyless fallback)");
+
+    const long = formatResearch(
+      {
+        provider: "Exa",
+        keyless: false,
+        query: "q",
+        sources: [{ title: "t", url: "https://example.com", text: "y".repeat(900) }],
+      },
+      120,
+    );
+    expect(long.length).toBe(121);
+    expect(long.endsWith("…")).toBe(true);
+  });
+
+  test("isFetchableUrl accepts pages and rejects binaries", () => {
+    expect(isFetchableUrl("https://cdek.ru/tarify")).toBe(true);
+    expect(isFetchableUrl("http://example.com")).toBe(true);
+    expect(isFetchableUrl("ftp://example.com")).toBe(false);
+    expect(isFetchableUrl("https://a.ru/logo.png")).toBe(false);
+    expect(isFetchableUrl("https://a.ru/doc.pdf")).toBe(false);
   });
 });
 
