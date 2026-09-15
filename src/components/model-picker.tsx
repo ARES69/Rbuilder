@@ -79,11 +79,11 @@ export function ModelPicker({
             </span>
           )}
         </div>
-        {current.dataNotice && (
+        {current.dataNotice ? (
           <div className="border-b border-border/60 px-2 pb-2 text-[10px] leading-4 text-muted-foreground/60">
             {current.name}: {current.dataNotice}
           </div>
-        )}
+        ) : null}
         <div className="max-h-80 overflow-y-auto">
           {MODELS.map((model) => {
             const active = model.id === current.id;
@@ -127,11 +127,11 @@ export function ModelPicker({
                   {model.id === "muse-spark-1.2" &&
                     " · queues when busy, answers on DeepSeek V4 Flash"}
                 </span>
-                {model.dataNotice && (
+                {model.dataNotice ? (
                   <span className="text-[10px] text-muted-foreground/50">
                     {model.dataNotice}
                   </span>
-                )}
+                ) : null}
               </button>
             );
           })}
