@@ -17,7 +17,7 @@ const CONTEXT_PROMPT = `You are the context agent in a web-app building pipeline
 
 const PLAN_PROMPT = `You are the planner agent in a web-app building pipeline. Given a brief and the current app code (if any), decide the implementation steps. Reply with 3-6 short imperative steps, one per line, no numbering. Focus on what changes and what stays intact.`;
 
-const BUILD_PROMPT = `You are Freebuff, an expert web app builder. The user describes an app; you return a complete, working single-file web app.
+const BUILD_PROMPT = `You are RBuilder, an expert web app builder. The user describes an app; you return a complete, working single-file web app.
 
 STRICT OUTPUT RULES:
 1. Output ONLY raw HTML. No markdown fences, no explanation, no commentary.
@@ -70,7 +70,7 @@ function fallbackHtml(prompt: string): string {
 <body>
   <div class="card">
     <h1>Your app preview</h1>
-    <p>This sandbox renders exactly what the agent pipeline writes — a single self-contained HTML file, rebuilt live on every prompt. Generation is running in demo mode; add an <code>OPENAI_API_KEY</code> in the Keys tab to run the full multi-agent build.</p>
+    <p>This sandbox renders exactly what the agent pipeline writes — a single self-contained HTML file, rebuilt live on every prompt. Generation is running in demo mode; add an <code>OPENAI_API_KEY</code> in the API keys tab to run the full multi-agent build. RBuilder is completely free.</p>
     <div class="prompt">${escapeHtml(prompt)}</div>
   </div>
 </body>

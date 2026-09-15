@@ -46,10 +46,7 @@ export default function Landing() {
           <div className="flex items-center gap-2.5">
             <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <Sparkles className="size-3.5" />
-            </span>
-            <span className="text-sm font-semibold tracking-tight">
-              Freebuff
-            </span>
+            </span>            <span className="text-sm font-semibold tracking-tight">RBuilder</span>
           </div>
           <nav className="flex items-center gap-1">
             {isLoading ? null : isAuthenticated ? (
@@ -94,9 +91,9 @@ export default function Landing() {
               Build a web app from a single chat.
             </h1>
             <p className="mt-6 max-w-xl text-base leading-7 text-muted-foreground md:text-lg">
-              Freebuff turns a prompt — and any files you attach — into a
+              RBuilder turns a prompt — and any files you attach — into a
               running application, rendered next to the conversation the moment
-              it is written.
+              it is written. Completely free, no subscription, no credits.
             </p>
             <div className="mt-10 flex items-center gap-3">
               <Button
@@ -174,7 +171,7 @@ export default function Landing() {
           <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-6 px-6 py-16 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-xl font-semibold tracking-tight">
-                Free, no subscription, no API key needed.
+                Completely free. No subscription, no credits, no API key needed.
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 Sign in and start with your first prompt.
@@ -194,7 +191,7 @@ export default function Landing() {
 
       <footer className="border-t border-border/70">
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-6 text-xs text-muted-foreground">
-          <span>© {new Date().getFullYear()} Freebuff</span>
+          <span>© {new Date().getFullYear()} RBuilder</span>
           <span>The free coding agent</span>
         </div>
       </footer>

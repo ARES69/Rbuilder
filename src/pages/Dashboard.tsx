@@ -4,6 +4,14 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { ModelPicker, useSessionStatus } from "@/components/model-picker";
 import { getModel, DAILY_SESSION_LIMIT } from "@/lib/models";
+import { WorkspaceTabs, type WorkspaceTab } from "@/components/workspace-tabs";
+import {
+  CodePanel,
+  DataPanel,
+  ApiKeysPanel,
+  IntegrationsPanel,
+  UiComponentsPanel,
+} from "@/components/workspace-panels";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -47,6 +55,14 @@ interface StagedFile {
   file: File;
 }
 
+function PanelEmpty({ text }: { text: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+      <p className="max-w-xs text-xs leading-5 text-muted-foreground/80">{text}</p>
+    </div>
+  );
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -77,6 +93,7 @@ export default function Dashboard() {
   const [previewKey, setPreviewKey] = useState(0);
   const [mobileTab, setMobileTab] = useState<"chat" | "preview">("chat");
   const [pendingModel, setPendingModel] = useState<string | undefined>(undefined);
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("preview");
   const session = useSessionStatus();
   const todayKey = new Date().toISOString().slice(0, 10);
 
@@ -284,7 +301,7 @@ export default function Dashboard() {
                 )}
               >
                 <span className="text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                  {message.role === "user" ? "You" : "Freebuff"}
+                  {message.role === "user" ? "You" : "RBuilder"}
                 </span>
                 <div
                   className={cn(
@@ -487,6 +504,35 @@ export default function Dashboard() {
     </div>
   );
 
+  const workspaceContent = (
+    <div className="flex h-full min-h-0 flex-col">
+      <WorkspaceTabs
+        value={workspaceTab}
+        onChange={setWorkspaceTab}
+        version={selectedProject?.version}
+      />
+      <div className="min-h-0 flex-1">
+        {workspaceTab === "preview" ? (
+          previewPanel
+        ) : workspaceTab === "code" ? (
+          <CodePanel html={selectedProject?.html} />
+        ) : workspaceTab === "data" ? (
+          selectedProjectId ? (
+            <DataPanel projectId={selectedProjectId} />
+          ) : (
+            <PanelEmpty text="Create a project to browse its data." />
+          )
+        ) : workspaceTab === "keys" ? (
+          <ApiKeysPanel />
+        ) : workspaceTab === "integrations" ? (
+          <IntegrationsPanel />
+        ) : (
+          <UiComponentsPanel />
+        )}
+      </div>
+    </div>
+  );
+
   if (authLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background">
@@ -607,7 +653,7 @@ export default function Dashboard() {
             {chatPanel}
           </TabsContent>
           <TabsContent value="preview" className="min-h-0 flex-1">
-            {previewPanel}
+            {workspaceContent}
           </TabsContent>
         </Tabs>
       ) : (
@@ -616,7 +662,7 @@ export default function Dashboard() {
             {chatPanel}
           </ResizablePanel>
           <ResizableHandle />
-          <ResizablePanel defaultSize={62}>{previewPanel}</ResizablePanel>
+          <ResizablePanel defaultSize={62}>{workspaceContent}</ResizablePanel>
         </ResizablePanelGroup>
       )}
     </main>
