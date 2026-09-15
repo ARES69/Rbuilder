@@ -1,12 +1,23 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
+import { getModel } from "../lib/models";
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 const MAX_ATTACHMENT_CHARS = 12_000;
 const MAX_HTML_CHARS = 400_000;
 
-const SYSTEM_PROMPT = `You are Freebuff, an expert web app builder. The user describes an app; you return a complete, working single-file web app.
+interface TraceEntry {
+  agent: string;
+  note?: string;
+  ms: number;
+}
+
+const CONTEXT_PROMPT = `You are the context agent in a web-app building pipeline. Given the user's request and optional attached files, produce a concise brief: what kind of app is needed, key screens/features, and any requirements from the attachments. Reply in 3-6 bullet points. No preamble.`;
+
+const PLAN_PROMPT = `You are the planner agent in a web-app building pipeline. Given a brief and the current app code (if any), decide the implementation steps. Reply with 3-6 short imperative steps, one per line, no numbering. Focus on what changes and what stays intact.`;
+
+const BUILD_PROMPT = `You are Freebuff, an expert web app builder. The user describes an app; you return a complete, working single-file web app.
 
 STRICT OUTPUT RULES:
 1. Output ONLY raw HTML. No markdown fences, no explanation, no commentary.
@@ -15,7 +26,9 @@ STRICT OUTPUT RULES:
 4. Make it beautiful: intentional typography, spacing, a restrained color palette, hover states, and responsive layout. Vanilla JS is fine.
 5. Fully implement the described functionality — working state, event handlers, and realistic seed data. Never leave stubs.
 
-If a previous version of the app is provided, treat it as the current code and apply the requested change, keeping everything else intact.`;
+If a previous version of the app is provided, treat it as the current code and apply the plan, keeping everything else intact.`;
+
+const REVIEW_PROMPT = `You are the reviewer agent in a web-app building pipeline. You receive an app's HTML and the plan it was built from. Check it for: broken structure, missing functionality versus the plan, stubs or placeholder text, script errors. Reply with either "OK" if acceptable, or a one-paragraph fix list starting with "FIX:".`;
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -57,24 +70,62 @@ function fallbackHtml(prompt: string): string {
 <body>
   <div class="card">
     <h1>Your app preview</h1>
-    <p>This sandbox renders exactly what the agent writes — a single self-contained HTML file, rebuilt live on every prompt. Generation is running in demo mode; add an <code>OPENAI_API_KEY</code> in the Keys tab to build real apps.</p>
+    <p>This sandbox renders exactly what the agent pipeline writes — a single self-contained HTML file, rebuilt live on every prompt. Generation is running in demo mode; add an <code>OPENAI_API_KEY</code> in the Keys tab to run the full multi-agent build.</p>
     <div class="prompt">${escapeHtml(prompt)}</div>
   </div>
 </body>
 </html>`;
 }
 
+async function callModel(
+  apiKey: string,
+  apiModel: string,
+  system: string,
+  user: string,
+  maxTokens: number,
+): Promise<string> {
+  const response = await fetch(OPENAI_CHAT_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: apiModel,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0.4,
+      max_tokens: maxTokens,
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(
+      `Model request failed (${response.status}). ${detail.slice(0, 200)}`,
+    );
+  }
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
 export const run = action({
   args: {
     prompt: v.string(),
+    modelId: v.optional(v.string()),
     previousHtml: v.optional(v.string()),
     attachmentIds: v.optional(v.array(v.id("attachments"))),
   },
-  handler: async (ctx, { prompt, previousHtml, attachmentIds }) => {
+  handler: async (ctx, { prompt, modelId, previousHtml, attachmentIds }) => {
     const user = await ctx.runQuery(api.users.currentUser);
     if (!user) throw new Error("Not authenticated");
 
+    const model = getModel(modelId);
     const apiKey = process.env.OPENAI_API_KEY;
+    const trace: TraceEntry[] = [];
 
     // Collect text attachment contents so the model can use uploaded files.
     const attachmentContext: string[] = [];
@@ -101,13 +152,53 @@ export const run = action({
       return {
         html: truncate(fallbackHtml(prompt), MAX_HTML_CHARS),
         demo: true,
+        trace: [{ agent: "builder", note: "demo mode", ms: 0 }],
       };
     }
 
-    const userContent = [
+    // Stage 1 — context agent
+    let t0 = Date.now();
+    const brief = await callModel(
+      apiKey,
+      model.apiModel,
+      CONTEXT_PROMPT,
+      [
+        attachmentContext.length
+          ? `Attached files:\n${attachmentContext.join("\n\n")}`
+          : null,
+        `Request:\n${prompt}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      500,
+    );
+    trace.push({ agent: "context", note: "mapped the request", ms: Date.now() - t0 });
+
+    // Stage 2 — planner agent
+    t0 = Date.now();
+    const plan = await callModel(
+      apiKey,
+      model.apiModel,
+      PLAN_PROMPT,
+      [
+        `Brief:\n${brief}`,
+        previousHtml
+          ? `Current app code exists (${previousHtml.length} chars) — plan only the changes.`
+          : "Brand new app — plan the full build.",
+        `Request:\n${prompt}`,
+      ].join("\n\n"),
+      500,
+    );
+    trace.push({ agent: "planner", note: "drafted the build plan", ms: Date.now() - t0 });
+
+    // Stage 3 — builder agent
+    t0 = Date.now();
+    const buildInput = [
       attachmentContext.length
         ? `Attached files:\n${attachmentContext.join("\n\n")}`
         : null,
+      `Brief:\n${brief}`,
+      `Plan:\n${plan}`,
       previousHtml
         ? `Current app code:\n${truncate(previousHtml, MAX_HTML_CHARS)}`
         : "This is a brand new app — no previous version exists yet.",
@@ -115,40 +206,53 @@ export const run = action({
     ]
       .filter(Boolean)
       .join("\n\n");
-
-    const response = await fetch(OPENAI_CHAT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userContent },
-        ],
-        temperature: 0.4,
-        max_tokens: 16000,
-      }),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(
-        `Model request failed (${response.status}). ${detail.slice(0, 200)}`,
-      );
-    }
-
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const raw = data.choices?.[0]?.message?.content ?? "";
-    const html = extractHtml(raw);
+    const raw = await callModel(
+      apiKey,
+      model.apiModel,
+      BUILD_PROMPT,
+      buildInput,
+      16000,
+    );
+    let html = extractHtml(raw);
     if (!html) {
       throw new Error("The model returned an empty response. Please try again.");
     }
+    trace.push({
+      agent: "builder",
+      note: `wrote v${(previousHtml?.length ?? 0) > 0 ? "update" : "1"} (${html.length} chars)`,
+      ms: Date.now() - t0,
+    });
 
-    return { html: truncate(html, MAX_HTML_CHARS), demo: false };
+    // Stage 4 — reviewer agent (one repair pass when it flags problems)
+    t0 = Date.now();
+    const review = await callModel(
+      apiKey,
+      model.apiModel,
+      REVIEW_PROMPT,
+      `Plan:\n${plan}\n\nApp HTML:\n${truncate(html, 120_000)}`,
+      600,
+    );
+    if (review.trim().toUpperCase().startsWith("FIX:")) {
+      const fixInput = [
+        `Current app code:\n${truncate(html, MAX_HTML_CHARS)}`,
+        `Reviewer notes:\n${review.trim()}`,
+        `Original request:\n${prompt}`,
+        `Apply the fixes and return the complete corrected HTML file. Raw HTML only.`,
+      ].join("\n\n");
+      const repaired = await callModel(
+        apiKey,
+        model.apiModel,
+        BUILD_PROMPT,
+        fixInput,
+        16000,
+      );
+      const repairedHtml = extractHtml(repaired);
+      if (repairedHtml) html = repairedHtml;
+      trace.push({ agent: "reviewer", note: "requested fixes, rebuilt", ms: Date.now() - t0 });
+    } else {
+      trace.push({ agent: "reviewer", note: "approved the build", ms: Date.now() - t0 });
+    }
+
+    return { html: truncate(html, MAX_HTML_CHARS), demo: false, trace };
   },
 });

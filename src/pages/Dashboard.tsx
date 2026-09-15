@@ -2,6 +2,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { ModelPicker, useSessionStatus } from "@/components/model-picker";
+import { getModel, DAILY_SESSION_LIMIT } from "@/lib/models";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -74,6 +76,9 @@ export default function Dashboard() {
   const [generating, setGenerating] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
   const [mobileTab, setMobileTab] = useState<"chat" | "preview">("chat");
+  const [pendingModel, setPendingModel] = useState<string | undefined>(undefined);
+  const session = useSessionStatus();
+  const todayKey = new Date().toISOString().slice(0, 10);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -97,6 +102,9 @@ export default function Dashboard() {
 
   const sendMessage = useMutation(api.messages.send);
   const commitBuild = useMutation(api.builds.commit);
+  const setModelMutation = useMutation(api.projects.setModel);
+
+  const activeModel = getModel(selectedProject?.model ?? pendingModel);
 
   const stagedSize = stagedFiles.reduce((sum, f) => sum + f.file.size, 0);
 
@@ -144,6 +152,15 @@ export default function Dashboard() {
     const content = input.trim();
     if (!content || generating || authLoading) return;
 
+    const model = getModel(selectedProject?.model ?? pendingModel);
+    const remaining = session ? session.limit - session.used : null;
+    if (model.costsSession && remaining !== null && remaining <= 0) {
+      toast.error(
+        `Daily sessions used up (${DAILY_SESSION_LIMIT}/${DAILY_SESSION_LIMIT}). Pick an unmetered model in the picker to continue.`,
+      );
+      return;
+    }
+
     setInput("");
     const files = stagedFiles;
     setStagedFiles([]);
@@ -156,6 +173,7 @@ export default function Dashboard() {
         projectId = await convex.mutation(api.projects.create, {
           name: "Untitled app",
           prompt: content,
+          model: model.id,
         });
         setSelectedProjectId(projectId);
       }
@@ -193,14 +211,25 @@ export default function Dashboard() {
         attachmentIds: attachmentIds.length ? attachmentIds : undefined,
       });
 
+      // Consume a daily session up front when the model is session-based.
+      if (model.costsSession) {
+        await convex.mutation(api.sessions.consume, { day: todayKey });
+      }
+
       const previous = await convex.query(api.projects.get, { projectId });
       const result = await convex.action(api.generation.run, {
         prompt: content,
+        modelId: model.id,
         previousHtml: previous?.html ?? undefined,
         attachmentIds: attachmentIds.length ? attachmentIds : undefined,
       });
 
-      await commitBuild({ projectId, html: result.html, demo: result.demo });
+      await commitBuild({
+        projectId,
+        html: result.html,
+        demo: result.demo,
+        trace: result.trace,
+      });
       setPreviewKey((k) => k + 1);
       toast.success(result.demo ? "Demo build ready" : "Build complete");
     } catch (error) {
@@ -267,6 +296,20 @@ export default function Dashboard() {
                 >
                   {message.content}
                 </div>
+                {message.trace && message.trace.length > 0 && (
+                  <div className="mt-1 flex max-w-[85%] flex-wrap gap-1">
+                    {message.trace.map((step, i) => (
+                      <span
+                        key={i}
+                        className="rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground"
+                        title={step.note}
+                      >
+                        {step.agent}
+                        {step.ms > 0 && ` · ${(step.ms / 1000).toFixed(1)}s`}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))
           )}
@@ -274,7 +317,8 @@ export default function Dashboard() {
           {generating && (
             <div className="flex items-center gap-2 pt-1 text-sm text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
-              Building your app…
+              {activeModel.name} pipeline: context → planner → builder →
+              reviewer…
             </div>
           )}
           <div ref={chatBottomRef} />
@@ -331,6 +375,17 @@ export default function Dashboard() {
               multiple
               className="hidden"
               onChange={(e) => addFiles(e.target.files)}
+            />
+            <ModelPicker
+              value={selectedProject?.model ?? pendingModel}
+              onChange={(id) => {
+                if (selectedProjectId) {
+                  void setModelMutation({ projectId: selectedProjectId, model: id });
+                } else {
+                  setPendingModel(id);
+                }
+              }}
+              disabled={generating}
             />
             <Button
               type="button"
@@ -512,6 +567,11 @@ export default function Dashboard() {
             <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
               <Loader2 className="size-3 animate-spin" />
               building
+            </span>
+          )}
+          {session && (
+            <span className="hidden text-xs text-muted-foreground/70 sm:block">
+              {session.used}/{session.limit} sessions today
             </span>
           )}
         </div>

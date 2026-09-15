@@ -27,8 +27,12 @@ export const get = query({
 });
 
 export const create = mutation({
-  args: { name: v.string(), prompt: v.optional(v.string()) },
-  handler: async (ctx, { name, prompt }) => {
+  args: {
+    name: v.string(),
+    prompt: v.optional(v.string()),
+    model: v.optional(v.string()),
+  },
+  handler: async (ctx, { name, prompt, model }) => {
     const user = await getCurrentUser(ctx);
     if (!user) throw new Error("Not authenticated");
     return await ctx.db.insert("projects", {
@@ -37,7 +41,19 @@ export const create = mutation({
       description: "",
       version: 0,
       lastPrompt: prompt,
+      model,
     });
+  },
+});
+
+export const setModel = mutation({
+  args: { projectId: v.id("projects"), model: v.string() },
+  handler: async (ctx, { projectId, model }) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) throw new Error("Not authenticated");
+    const project = await ctx.db.get(projectId);
+    if (!project || project.userId !== user._id) throw new Error("Not found");
+    await ctx.db.patch(projectId, { model });
   },
 });
 

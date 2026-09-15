@@ -45,12 +45,22 @@ const schema = defineSchema(
       html: v.optional(v.string()),
       version: v.number(),
       lastPrompt: v.optional(v.string()),
+      model: v.optional(v.string()), // selected model id from the catalog
     }).index("by_user", ["userId"]),
 
     messages: defineTable({
       projectId: v.id("projects"),
       role: messageRoleValidator,
       content: v.string(),
+      trace: v.optional(
+        v.array(
+          v.object({
+            agent: v.string(),
+            note: v.optional(v.string()),
+            ms: v.number(),
+          }),
+        ),
+      ),
     }).index("by_project", ["projectId"]),
 
     attachments: defineTable({
@@ -60,6 +70,13 @@ const schema = defineSchema(
       size: v.number(),
       storageId: v.optional(v.id("_storage")),
     }).index("by_project", ["projectId"]),
+
+    // daily build sessions for session-based models (6/day, Freebuff-style)
+    sessions: defineTable({
+      userId: v.id("users"),
+      day: v.string(), // YYYY-MM-DD (computed client-side)
+      used: v.number(),
+    }).index("by_user_day", ["userId", "day"]),
   },
   {
     schemaValidation: false,
