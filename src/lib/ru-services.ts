@@ -25,7 +25,7 @@ export interface ServiceField {
 export interface RuService {
   id: string; // connector id, e.g. "bitrix24"
   name: string;
-  category: "CRM" | "ERP" | "Payments" | "Delivery" | "Data" | "Messaging" | "Docs";
+  category: "CRM" | "ERP" | "Payments" | "Delivery" | "Data" | "Messaging" | "Docs" | "Storage";
   desc: string;
   fields: ServiceField[];
   /** API pattern used by the connection test in convex/integrations.ts. */
@@ -42,7 +42,8 @@ export interface RuService {
     | "tg-bot"
     | "vk-service"
     | "smsaero-bearer"
-    | "diadoc-auth";
+    | "diadoc-auth"
+    | "yadisk-oauth";
   docsUrl: string;
   /** Which agent capability this unlocks (shown as a hint chip). */
   unlocks: string;
@@ -249,6 +250,31 @@ export const RU_SERVICES: RuService[] = [
     ],
   },
   {
+    id: "yadisk",
+    name: "Яндекс Диск",
+    category: "Storage",
+    desc: "Файлы и папки через REST API: загрузка, скачивание, публикация ссылок",
+    pattern: "yadisk-oauth",
+    docsUrl: "https://yandex.ru/dev/disk-api/doc/ru/",
+    unlocks: "Сохранение файлов и документов приложения на Яндекс Диск",
+    fields: [
+      SECRET_FIELD(
+        "accessToken",
+        "OAuth-токен",
+        "y0_AgAAAAA...",
+        "Создайте приложение на oauth.yandex.ru с доступом к Яндекс Диску (cloud_api:disk)",
+      ),
+      {
+        id: "folder",
+        label: "Рабочая папка",
+        type: "text",
+        placeholder: "/RBuilder",
+        required: false,
+        help: "Папка на Диске для файлов приложения (необязательно, по умолчанию корень)",
+      },
+    ],
+  },
+  {
     id: "diadoc",
     name: "Диадок (Контур)",
     category: "Docs",
@@ -264,7 +290,16 @@ export const RU_SERVICES: RuService[] = [
   },
 ];
 
-export const SERVICE_CATEGORIES = ["CRM", "ERP", "Payments", "Delivery", "Data", "Messaging", "Docs"] as const;
+export const SERVICE_CATEGORIES = [
+  "CRM",
+  "ERP",
+  "Payments",
+  "Delivery",
+  "Data",
+  "Messaging",
+  "Docs",
+  "Storage",
+] as const;
 
 export function findService(id: string): RuService | undefined {
   return RU_SERVICES.find((service) => service.id === id);

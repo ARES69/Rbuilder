@@ -433,6 +433,30 @@ async function testConnection(
       return fail(`Диадок: сервер ответил ${response.status}`);
     }
 
+    case "yadisk-oauth": {
+      const token = f("accessToken");
+      const response = await withTimeout(
+        fetch("https://cloud-api.yandex.net/v1/disk", {
+          headers: { Authorization: `OAuth ${token}`, Accept: "application/json" },
+        }),
+      );
+      const data = await jsonOf(response);
+      if (response.ok && data?.user) {
+        const who = data.user.display_name || data.user.login || "пользователь";
+        const totalGb = data.total_space ? (data.total_space / 1024 ** 3).toFixed(0) : null;
+        const usedGb = data.used_space ? (data.used_space / 1024 ** 3).toFixed(1) : null;
+        const space = totalGb && usedGb ? `, занято ${usedGb} из ${totalGb} ГБ` : "";
+        return ok(`Яндекс Диск подключён: ${who}${space}`);
+      }
+      if (response.status === 401) {
+        return fail("Яндекс Диск: OAuth-токен недействителен (401) — выпустите новый на oauth.yandex.ru");
+      }
+      if (data?.message) {
+        return fail(`Яндекс Диск: ${data.message}`);
+      }
+      return fail(`Яндекс Диск: сервер ответил ${response.status}`);
+    }
+
     default:
       return fail(`Шаблон подключения «${pattern}» пока не поддерживается`);
   }
@@ -441,8 +465,11 @@ async function testConnection(
 /* --------------------------------- helpers -------------------------------- */
 
 function pickMeta(service: RuService, credentials: Record<string, string>): string | undefined {
-  const firstUrl = service.fields.find((field: ServiceField) => field.type === "url");
-  return firstUrl ? credentials[firstUrl.id] : undefined;
+  const urlField = service.fields.find((field: ServiceField) => field.type === "url");
+  if (urlField) return credentials[urlField.id];
+  // Services without a URL field (e.g. Яндекс Диск) show their working folder
+  const folderField = service.fields.find((field: ServiceField) => field.id === "folder");
+  return folderField ? credentials[folderField.id] : undefined;
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms = 8000): Promise<T> {
