@@ -2,6 +2,11 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  AppSidebar,
+  CapabilityChips,
+  type SidebarSection,
+} from "@/components/app-sidebar";
 import { ModelPicker, useSessionStatus } from "@/components/model-picker";
 import { getModel, DAILY_SESSION_LIMIT } from "@/lib/models";
 import { WorkspaceTabs, type WorkspaceTab } from "@/components/workspace-tabs";
@@ -42,6 +47,7 @@ import {
   Loader2,
   LogOut,
   Monitor,
+  PanelLeft,
   Paperclip,
   Plus,
   RefreshCw,
@@ -86,6 +92,8 @@ export default function Dashboard() {
   const [mobileTab, setMobileTab] = useState<"chat" | "preview">("chat");
   const [pendingModel, setPendingModel] = useState<string | undefined>(undefined);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("preview");
+  const [sidebarSection, setSidebarSection] = useState<SidebarSection>("chat");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const session = useSessionStatus();
   const todayKey = new Date().toISOString().slice(0, 10);
 
@@ -147,6 +155,7 @@ export default function Dashboard() {
       setSelectedProjectId(id);
       setStagedFiles([]);
       setMobileTab("chat");
+      setSidebarSection("chat");
     } catch {
       toast.error("Could not create a new project.");
     }
@@ -257,6 +266,13 @@ export default function Dashboard() {
     } finally {
       setGenerating(false);
     }
+  };
+
+  /** Fill the composer from a sidebar template/capability and focus chat. */
+  const seedComposer = (prompt: string) => {
+    setInput(prompt);
+    setSidebarSection("chat");
+    setMobileTab("chat");
   };
 
   const openPreviewInTab = () => {
@@ -545,6 +561,17 @@ export default function Dashboard() {
       {/* Top bar */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border/70 px-3">
         <div className="flex items-center gap-2">
+          {!isMobile && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 text-muted-foreground"
+              onClick={() => setSidebarCollapsed((value) => !value)}
+              aria-label={sidebarCollapsed ? "Показать панель" : "Скрыть панель"}
+            >
+              <PanelLeft className={cn("size-4", !sidebarCollapsed && "text-foreground")} />
+            </Button>
+          )}
           <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Sparkles className="size-3.5" />
           </span>
@@ -637,7 +664,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Chat + preview */}
+      {/* Sidebar + chat + preview */}
       {isMobile ? (
         <Tabs
           value={mobileTab}
@@ -648,7 +675,8 @@ export default function Dashboard() {
             <TabsTrigger value="chat">Chat</TabsTrigger>
             <TabsTrigger value="preview">Preview</TabsTrigger>
           </TabsList>
-          <TabsContent value="chat" className="min-h-0 flex-1">
+          <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
+            <CapabilityChips onPick={seedComposer} />
             {chatPanel}
           </TabsContent>
           <TabsContent value="preview" className="min-h-0 flex-1">
@@ -657,11 +685,34 @@ export default function Dashboard() {
         </Tabs>
       ) : (
         <ResizablePanelGroup direction="horizontal" className="flex-1">
-          <ResizablePanel defaultSize={38} minSize={26} maxSize={60}>
+          <ResizablePanel
+            defaultSize={17}
+            minSize={sidebarCollapsed ? 0 : 13}
+            maxSize={26}
+            onCollapse={() => setSidebarCollapsed(true)}
+            onExpand={() => setSidebarCollapsed(false)}
+            collapsedSize={sidebarCollapsed ? 0 : undefined}
+          >
+            <AppSidebar
+              section={sidebarSection}
+              onSectionChange={setSidebarSection}
+              onNewProject={() => void handleNewProject()}
+              onSelectProject={(id) => {
+                setSelectedProjectId(id);
+                setSidebarSection("chat");
+                setMobileTab("chat");
+              }}
+              onSeedPrompt={seedComposer}
+              activeProjectId={effectiveProjectId}
+              collapsed={sidebarCollapsed}
+            />
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={36} minSize={24} maxSize={56}>
             {chatPanel}
           </ResizablePanel>
           <ResizableHandle />
-          <ResizablePanel defaultSize={62}>{workspaceContent}</ResizablePanel>
+          <ResizablePanel defaultSize={47}>{workspaceContent}</ResizablePanel>
         </ResizablePanelGroup>
       )}
     </main>

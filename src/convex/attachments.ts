@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { getCurrentUser } from "./users";
 
 /** Returns a short-lived upload URL for storing a file in Convex storage. */
@@ -61,6 +62,45 @@ export const list = query({
       .query("attachments")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
+  },
+});
+
+/** All attachments across the user's projects (for the Knowledge Base view). */
+export const listAllForUser = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) return [];
+    const projects = await ctx.db
+      .query("projects")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+    const byId = new Map(projects.map((p) => [p._id as string, p.name]));
+    const result: Array<{
+      _id: Id<"attachments">;
+      name: string;
+      mimeType: string;
+      size: number;
+      projectName: string;
+      _creationTime: number;
+    }> = [];
+    for (const project of projects) {
+      const attachments = await ctx.db
+        .query("attachments")
+        .withIndex("by_project", (q) => q.eq("projectId", project._id))
+        .collect();
+      for (const attachment of attachments) {
+        result.push({
+          _id: attachment._id,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          projectName: byId.get(attachment.projectId) ?? "—",
+          _creationTime: attachment._creationTime,
+        });
+      }
+    }
+    return result.sort((a, b) => b._creationTime - a._creationTime);
   },
 });
 
