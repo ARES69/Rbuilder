@@ -51,7 +51,7 @@ export interface DesktopBridge {
   gitPull(root: string): Promise<CommandResult>;
   gitPush(root: string): Promise<CommandResult>;
   gitStash(root: string): Promise<CommandResult>;
-  runCommand(root: string, command: string, args?: string[]): Promise<CommandResult>;
+  runCommand(root: string, command: string, args?: string[], approved?: boolean): Promise<CommandResult>;
   startPreview(root: string, command?: string): Promise<{ url: string; pid?: number }>;
   listProcesses(): Promise<DesktopProcess[]>;
   stopProcess(pid: number): Promise<void>;
@@ -115,8 +115,8 @@ function createDesktopBridge(invoke: TauriLikeInvoke): DesktopBridge {
     gitPull: (root) => call<CommandResult>(DESKTOP_COMMANDS.gitPull, { root }),
     gitPush: (root) => call<CommandResult>(DESKTOP_COMMANDS.gitPush, { root }),
     gitStash: (root) => call<CommandResult>(DESKTOP_COMMANDS.gitStash, { root }),
-    runCommand: (root, command, args = []) =>
-      call<CommandResult>(DESKTOP_COMMANDS.runCommand, { root, command, args }),
+    runCommand: (root, command, args = [], approved = false) =>
+      call<CommandResult>(DESKTOP_COMMANDS.runCommand, { root, command, args, approved }),
     startPreview: (root, command = "bun run dev") =>
       call<{ url: string; pid?: number }>(DESKTOP_COMMANDS.startPreview, { root, command }),
     listProcesses: () => call<DesktopProcess[]>(DESKTOP_COMMANDS.listProcesses),

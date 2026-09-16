@@ -301,7 +301,7 @@ export function DesktopWorkspaceControls() {
     }
   };
 
-  const executeTerminal = async () => {
+  const executeTerminal = async (approved = false) => {
     const commandLine = terminalCommand.trim();
     if (!runtime.available || !root || !commandLine) {
       if (!runtime.available) toast.info("Терминал доступен в RBuilder Desktop.");
@@ -310,7 +310,7 @@ export function DesktopWorkspaceControls() {
     const [command, ...args] = commandLine.split(/\\s+/);
     setTerminalRunning(true);
     try {
-      const result = await runtime.runCommand(root, command, args);
+      const result = await runtime.runCommand(root, command, args, approved);
       setTerminalOutput(`$ ${commandLine}\\n\\n${result.stdout}${result.stderr ? `\\n${result.stderr}` : ""}\\n[exit ${result.code}]`);
       if (result.code === 0) toast.success("Команда завершена");
       else toast.error(`Команда завершилась с кодом ${result.code}`);
@@ -334,7 +334,7 @@ export function DesktopWorkspaceControls() {
     setPendingAction({
       title: "Запустить команду?",
       description: `Команда «${command}» не входит в безопасный список. Она может изменить файлы, установить зависимости или удалить данные.`,
-      run: executeTerminal,
+      run: () => executeTerminal(true),
     });
   };
 
