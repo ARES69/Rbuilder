@@ -1,8 +1,6 @@
 [package]
 name = "rbuilder-desktop"
 version = "0.1.0"
-description = "RBuilder Desktop coding agent"
-authors = ["RBuilder"]
 edition = "2021"
 
 [lib]
