@@ -1,7 +1,16 @@
 import { useState } from "react";
-import { FolderOpen, GitBranch, Loader2 } from "lucide-react";
+import { FolderOpen, GitBranch, Loader2, RefreshCw, GitCommitHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { getDesktopRuntime, type DesktopRuntime, type GitStatus } from "@/lib/desktop-bridge";
 
@@ -9,7 +18,20 @@ export function DesktopWorkspaceControls() {
   const [runtime] = useState<DesktopRuntime>(() => getDesktopRuntime());
   const [root, setRoot] = useState<string | null>(null);
   const [git, setGit] = useState<GitStatus | null>(null);
+  const [diff, setDiff] = useState("");
+  const [commitMessage, setCommitMessage] = useState("");
+  const [gitOpen, setGitOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [gitLoading, setGitLoading] = useState(false);
+
+  const refreshGit = async (workspaceRoot: string) => {
+    const [status, nextDiff] = await Promise.all([
+      runtime.available ? runtime.gitStatus(workspaceRoot) : Promise.resolve(null),
+      runtime.available ? runtime.gitDiff(workspaceRoot) : Promise.resolve(""),
+    ]);
+    setGit(status);
+    setDiff(nextDiff);
+  };
 
   const openWorkspace = async () => {
     if (!runtime.available) {
@@ -21,7 +43,7 @@ export function DesktopWorkspaceControls() {
       const selected = await runtime.pickWorkspace();
       if (!selected) return;
       setRoot(selected);
-      setGit(await runtime.gitStatus(selected));
+      await refreshGit(selected);
       toast.success("Локальный workspace подключён");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Не удалось открыть workspace");
@@ -30,27 +52,135 @@ export function DesktopWorkspaceControls() {
     }
   };
 
+  const openGit = async () => {
+    if (!runtime.available || !root) {
+      toast.info("Git-панель станет доступна после подключения RBuilder Desktop.");
+      return;
+    }
+    setGitLoading(true);
+    try {
+      await refreshGit(root);
+      setGitOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось получить Git status");
+    } finally {
+      setGitLoading(false);
+    }
+  };
+
+  const commit = async () => {
+    const message = commitMessage.trim();
+    if (!runtime.available || !root || !message) return;
+    setGitLoading(true);
+    try {
+      const result = await runtime.gitCommit(root, message);
+      if (result.code !== 0) {
+        throw new Error(result.stderr || "Git commit завершился с ошибкой");
+      }
+      setCommitMessage("");
+      await refreshGit(root);
+      toast.success("Commit создан");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось создать commit");
+    } finally {
+      setGitLoading(false);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-1">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="hidden h-8 gap-1.5 px-2 text-xs text-muted-foreground lg:inline-flex"
-        onClick={() => void openWorkspace()}
-        disabled={loading}
-        title={root ?? "Открыть локальную папку"}
-      >
-        {loading ? <Loader2 className="size-3.5 animate-spin" /> : <FolderOpen className="size-3.5" />}
-        <span className="max-w-28 truncate">{root ? root.split(/[\\/]/).pop() : "Открыть папку"}</span>
-      </Button>
-      {git && (
-        <Badge variant="outline" className="hidden h-6 max-w-36 gap-1 truncate px-2 text-[10px] text-muted-foreground xl:inline-flex" title={`${git.entries.length} изменений`}>
-          <GitBranch className="size-3 shrink-0" />
-          <span className="truncate">{git.branch}</span>
-          {git.entries.length > 0 ? <span className="text-amber-600">· {git.entries.length}</span> : null}
-        </Badge>
-      )}
-    </div>
+    <>
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="hidden h-8 gap-1.5 px-2 text-xs text-muted-foreground lg:inline-flex"
+          onClick={() => void openWorkspace()}
+          disabled={loading}
+          title={root ?? "Открыть локальную папку"}
+        >
+          {loading ? <Loader2 className="size-3.5 animate-spin" /> : <FolderOpen className="size-3.5" />}
+          <span className="max-w-28 truncate">{root ? root.split(/[\\/]/).pop() : "Открыть папку"}</span>
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="hidden h-8 gap-1.5 px-2 text-xs text-muted-foreground lg:inline-flex"
+          onClick={() => void openGit()}
+          disabled={gitLoading}
+          title="Открыть Git status и diff"
+        >
+          {gitLoading ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
+          Git
+        </Button>
+        {git && (
+          <Badge variant="outline" className="hidden h-6 max-w-36 gap-1 truncate px-2 text-[10px] text-muted-foreground xl:inline-flex" title={`${git.entries.length} изменений`}>
+            <GitBranch className="size-3 shrink-0" />
+            <span className="truncate">{git.branch}</span>
+            {git.entries.length > 0 ? <span className="text-amber-600">· {git.entries.length}</span> : null}
+          </Badge>
+        )}
+      </div>
+
+      <Dialog open={gitOpen} onOpenChange={setGitOpen}>
+        <DialogContent className="max-h-[85vh] sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <GitBranch className="size-4" /> Локальный Git
+            </DialogTitle>
+            <DialogDescription className="truncate text-xs">
+              {root ?? "Локальный workspace"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-between rounded-md border border-border/70 px-3 py-2 text-xs">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <GitBranch className="size-3.5" /> {git?.branch ?? "unknown"}
+            </span>
+            <span className={git?.clean ? "text-emerald-600" : "text-amber-600"}>
+              {git?.clean ? "Рабочее дерево чистое" : `${git?.entries.length ?? 0} изменений`}
+            </span>
+            <Button type="button" variant="ghost" size="icon-sm" onClick={() => root && void openGit()} disabled={gitLoading} aria-label="Обновить Git status">
+              <RefreshCw className={gitLoading ? "size-3.5 animate-spin" : "size-3.5"} />
+            </Button>
+          </div>
+          <div className="grid min-h-0 gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+            <div className="min-h-0 rounded-md border border-border/70 p-3">
+              <p className="mb-2 text-xs font-medium">Изменённые файлы</p>
+              <div className="max-h-56 space-y-1 overflow-y-auto">
+                {git?.entries.length ? git.entries.map((entry) => (
+                  <div key={`${entry.status}-${entry.path}`} className="flex items-center gap-2 text-xs">
+                    <Badge variant="outline" className="h-5 min-w-6 justify-center px-1 text-[10px]">{entry.status[0].toUpperCase()}</Badge>
+                    <span className="truncate" title={entry.path}>{entry.path}</span>
+                  </div>
+                )) : <p className="text-xs text-muted-foreground">Изменений нет</p>}
+              </div>
+            </div>
+            <pre className="max-h-56 min-h-32 overflow-auto rounded-md border border-border/70 bg-muted/30 p-3 text-[10px] leading-4 text-foreground/80">
+              {diff || "Diff пуст — рабочее дерево чистое."}
+            </pre>
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="desktop-commit-message" className="text-xs font-medium">Сообщение commit</label>
+            <Textarea
+              id="desktop-commit-message"
+              value={commitMessage}
+              onChange={(event) => setCommitMessage(event.target.value)}
+              placeholder="Например: feat: add orders table"
+              rows={2}
+              className="resize-none text-xs"
+              disabled={gitLoading || !git?.entries.length}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setGitOpen(false)}>Закрыть</Button>
+            <Button type="button" size="sm" onClick={() => void commit()} disabled={gitLoading || !commitMessage.trim() || !git?.entries.length}>
+              {gitLoading ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
+              Создать commit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
