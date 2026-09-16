@@ -78,6 +78,7 @@ import {
   SendHorizontal,
   ShieldCheck,
   Sparkles,
+  MousePointer2,
   X,
 } from "lucide-react";
 
@@ -134,6 +135,12 @@ export default function Dashboard() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const [selectingPreviewElement, setSelectingPreviewElement] = useState(false);
+  const [selectedPreviewElement, setSelectedPreviewElement] = useState<{
+    selector: string;
+    tag: string;
+    text: string;
+  } | null>(null);
 
   // Effective selection: the explicit pick when set, otherwise the most
   // recent project. Derived during render — no state-sync effect needed.
@@ -161,6 +168,109 @@ export default function Dashboard() {
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages?.length, generating]);
+
+  // Attach the element picker to every rendered preview iframe. srcDoc keeps
+  // the document same-origin, so we can inspect it without adding runtime code
+  // to the generated application.
+  useEffect(() => {
+    const iframes = Array.from(
+      document.querySelectorAll<HTMLIFrameElement>("iframe[data-rbuilder-preview]"),
+    );
+    const cleanups: (() => void)[] = [];
+
+    const selectorFor = (element: HTMLElement): string => {
+      if (element.id) return `#${CSS.escape(element.id)}`;
+      const parts: string[] = [];
+      let current: HTMLElement | null = element;
+      while (current && current.tagName.toLowerCase() !== "html") {
+        let part = current.tagName.toLowerCase();
+        if (current.classList.length > 0) {
+          part += `.${Array.from(current.classList).slice(0, 2).map((name) => CSS.escape(name)).join(".")}`;
+        }
+        const parent: HTMLElement | null = current.parentElement;
+        if (parent) {
+          const tagName = current.tagName;
+          const siblings = Array.from(parent.children).filter(
+            (child: Element) => child.tagName === tagName,
+          );
+          const siblingIndex = siblings.indexOf(current);
+          if (siblings.length > 1) part += `:nth-of-type(${siblingIndex + 1})`;
+        }
+        parts.unshift(part);
+        current = parent;
+      }
+      return parts.join(" > ");
+    };
+
+    const bind = (iframe: HTMLIFrameElement) => {
+      const doc = iframe.contentDocument;
+      if (!doc) return;
+      const style = doc.createElement("style");
+      style.dataset.rbuilderPicker = "true";
+      style.textContent = `
+        [data-rbuilder-picker-hover] { outline: 2px solid #3b82f6 !important; outline-offset: 2px !important; cursor: crosshair !important; }
+        [data-rbuilder-picker-selected] { outline: 2px solid #22c55e !important; outline-offset: 2px !important; }
+      `;
+      doc.head.appendChild(style);
+
+      let hovered: HTMLElement | null = null;
+      const clearHover = () => {
+        hovered?.removeAttribute("data-rbuilder-picker-hover");
+        hovered = null;
+      };
+      const onMove = (event: MouseEvent) => {
+        if (!selectingPreviewElement) return;
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (!target || target === doc.body || target === doc.documentElement) return;
+        if (hovered !== target) {
+          clearHover();
+          hovered = target;
+          hovered.setAttribute("data-rbuilder-picker-hover", "true");
+        }
+      };
+      const onClick = (event: MouseEvent) => {
+        if (!selectingPreviewElement) return;
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (!target || target === doc.body || target === doc.documentElement) return;
+        event.preventDefault();
+        event.stopPropagation();
+        clearHover();
+        target.setAttribute("data-rbuilder-picker-selected", "true");
+        const text = (target.innerText || target.textContent || "").trim().replace(/\\s+/g, " ").slice(0, 160);
+        const selection = { selector: selectorFor(target), tag: target.tagName.toLowerCase(), text };
+        setSelectedPreviewElement(selection);
+        setInput((current) => `${current.trim()}${current.trim() ? "\\n\\n" : ""}Измени выбранный элемент: ${selection.selector}${selection.text ? ` (${selection.text})` : ""}`);
+        setSelectingPreviewElement(false);
+        toast.success(`Выбран элемент ${selection.selector}`);
+      };
+      doc.addEventListener("mousemove", onMove, true);
+      doc.addEventListener("click", onClick, true);
+      cleanups.push(() => {
+        doc.removeEventListener("mousemove", onMove, true);
+        doc.removeEventListener("click", onClick, true);
+        clearHover();
+        style.remove();
+      });
+    };
+
+    iframes.forEach((iframe) => {
+      if (iframe.contentDocument?.readyState === "complete") bind(iframe);
+      else iframe.addEventListener("load", () => bind(iframe), { once: true });
+    });
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [selectingPreviewElement, previewKey, effectiveProjectId]);
+
+  useEffect(() => {
+    if (!selectingPreviewElement) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectingPreviewElement(false);
+        toast.info("Выбор элемента отменён");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectingPreviewElement]);
 
   const selectedProject = useMemo(() => {
     if (projectDetail) return projectDetail;
@@ -493,6 +603,41 @@ export default function Dashboard() {
 
       {/* Composer */}
       <div className="border-t border-border/70 p-3">
+        {selectingPreviewElement && (
+          <div className="mb-2 flex items-center justify-between rounded-md border border-blue-400/30 bg-blue-400/10 px-2.5 py-1.5 text-[11px] text-blue-200">
+            <span className="flex items-center gap-1.5">
+              <MousePointer2 className="size-3.5" /> Нажмите на элемент в превью · Escape — отмена
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[10px] text-blue-200 hover:bg-blue-400/10"
+              onClick={() => setSelectingPreviewElement(false)}
+            >
+              Отмена
+            </Button>
+          </div>
+        )}
+
+        {selectedPreviewElement && !selectingPreviewElement && (
+          <div className="mb-2 flex items-center justify-between rounded-md border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1.5 text-[11px] text-emerald-200">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <MousePointer2 className="size-3.5 shrink-0" />
+              <span className="truncate">Выбран {selectedPreviewElement.selector}</span>
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[10px] text-emerald-200 hover:bg-emerald-400/10"
+              onClick={() => setSelectedPreviewElement(null)}
+            >
+              Убрать
+            </Button>
+          </div>
+        )}
+
         {stagedFiles.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {stagedFiles.map((staged) => (
@@ -615,6 +760,24 @@ export default function Dashboard() {
             >
               <SlidersHorizontal className="size-3.5" />
               Пресеты
+            </Button>
+            <Button
+              type="button"
+              variant={selectingPreviewElement ? "secondary" : "ghost"}
+              size="sm"
+              className="h-8 gap-1.5 text-muted-foreground"
+              onClick={() => {
+                if (!selectedProject?.html) {
+                  toast.info("Сначала создайте приложение в превью");
+                  return;
+                }
+                setSelectingPreviewElement((active) => !active);
+              }}
+              disabled={generating}
+              title="Выбрать элемент в превью и добавить его в запрос"
+            >
+              <MousePointer2 className="size-3.5" />
+              <span className="hidden xl:inline">Выбрать в превью</span>
             </Button>
             <Button
               type="button"
@@ -851,7 +1014,11 @@ export default function Dashboard() {
             title="App preview"
             srcDoc={selectedProject.html}
             sandbox="allow-scripts allow-forms allow-modals allow-popups"
-            className="h-full w-full rounded-md border border-border/70 bg-white"
+            data-rbuilder-preview="true"
+            className={cn(
+              "h-full w-full rounded-md border border-border/70 bg-white",
+              selectingPreviewElement && "cursor-crosshair",
+            )}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center rounded-md border border-dashed border-border/80">
@@ -1051,7 +1218,7 @@ export default function Dashboard() {
             variant="default"
             size="sm"
             className="hidden h-8 gap-1.5 bg-blue-600 px-3 text-xs text-white shadow-[0_0_18px_rgba(37,99,235,0.25)] hover:bg-blue-500 sm:inline-flex"
-            onClick={openPreviewInTab}
+            onClick={handleDeploy}
             disabled={!selectedProject?.html}
           >
             <Rocket className="size-3.5" /> Deploy
