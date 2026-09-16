@@ -27,7 +27,7 @@ function Add-ToolPaths {
     "$env:ProgramFiles\Git\bin",
     "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
   )
-  $existing = $paths | Where-Object { $_ -and (Test-Path $_) }
+  $existing = @($paths | Where-Object { $_ -and (Test-Path $_) })
   if ($existing.Count -gt 0) {
     $env:Path = (($existing + ($env:Path -split [IO.Path]::PathSeparator)) -join [IO.Path]::PathSeparator)
   }
@@ -44,12 +44,12 @@ function Ensure-Administrator {
     return
   }
 
-  Write-Host "Запрашиваются права администратора для установки системных компонентов..." -ForegroundColor Yellow
+  Write-Host "Administrator permission is required. Requesting elevation..." -ForegroundColor Yellow
   $scriptPath = $MyInvocation.ScriptName
   $arguments = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
-    "-File", "`"$scriptPath`""
+    "-File", $scriptPath
   )
   if ($Build) { $arguments += "-Build" }
   $process = Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $arguments -Wait -PassThru
@@ -58,18 +58,18 @@ function Ensure-Administrator {
 
 function Ensure-Winget {
   if (Test-Command "winget") {
-    Write-Ok "winget найден"
+    Write-Ok "winget found"
     return
   }
 
-  throw "winget не найден. Установите или обновите App Installer из Microsoft Store, затем запустите install-rbuilder-windows.bat снова."
+  throw "winget was not found. Install or update App Installer from Microsoft Store, then run the installer again."
 }
 
 function Install-WingetPackage([string]$Id, [string[]]$ExtraArguments = @()) {
-  Write-Host "Установка $Id..." -ForegroundColor DarkCyan
+  Write-Host "Installing $Id..." -ForegroundColor DarkCyan
   & winget install --id $Id --exact --silent --accept-package-agreements --accept-source-agreements @ExtraArguments
   if ($LASTEXITCODE -ne 0) {
-    throw "winget не смог установить $Id (код $LASTEXITCODE)."
+    throw "winget failed to install $Id (exit code $LASTEXITCODE)."
   }
   Add-ToolPaths
 }
@@ -80,19 +80,19 @@ function Ensure-Git {
     Install-WingetPackage "Git.Git"
     Add-ToolPaths
   }
-  if (-not (Test-Command "git")) { throw "Git установлен, но не найден в PATH. Перезапустите Windows и повторите запуск." }
+  if (-not (Test-Command "git")) { throw "Git was installed but is not available in PATH. Restart Windows and try again." }
   Write-Ok "Git $(git --version)"
 }
 
 function Ensure-Bun {
   Add-ToolPaths
   if (-not (Test-Command "bun")) {
-    Write-Host "Bun не найден. Запускается официальный установщик Bun..." -ForegroundColor DarkCyan
+    Write-Host "Bun was not found. Running the official Bun installer..." -ForegroundColor DarkCyan
     $installer = Invoke-RestMethod -Uri "https://bun.sh/install.ps1"
     Invoke-Expression $installer
     Add-ToolPaths
   }
-  if (-not (Test-Command "bun")) { throw "Bun не найден после установки. Закройте все терминалы, откройте новый PowerShell и повторите запуск." }
+  if (-not (Test-Command "bun")) { throw "Bun was not found after installation. Restart the terminal and try again." }
   Write-Ok "Bun $(bun --version)"
 }
 
@@ -102,18 +102,18 @@ function Ensure-Rust {
     Install-WingetPackage "Rustlang.Rustup"
     Add-ToolPaths
   }
-  if (-not (Test-Command "rustup")) { throw "Rustup не найден после установки." }
+  if (-not (Test-Command "rustup")) { throw "Rustup was not found after installation." }
 
   & rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
-  if ($LASTEXITCODE -ne 0) { throw "Не удалось установить Rust MSVC toolchain." }
+  if ($LASTEXITCODE -ne 0) { throw "Could not install the Rust MSVC toolchain." }
   & rustup default stable-x86_64-pc-windows-msvc
-  if ($LASTEXITCODE -ne 0) { throw "Не удалось выбрать Rust MSVC toolchain." }
+  if ($LASTEXITCODE -ne 0) { throw "Could not select the Rust MSVC toolchain." }
   & rustup target add x86_64-pc-windows-msvc
-  if ($LASTEXITCODE -ne 0) { throw "Не удалось добавить Windows MSVC target." }
+  if ($LASTEXITCODE -ne 0) { throw "Could not add the Windows MSVC target." }
   Add-ToolPaths
 
   if (-not (Test-Command "cargo") -or -not (Test-Command "rustc")) {
-    throw "Cargo/rustc не найдены после установки Rust. Перезапустите Windows и повторите запуск."
+    throw "Cargo or rustc was not found after Rust installation. Restart Windows and try again."
   }
   Write-Ok "$(rustc --version)"
   Write-Ok "$(cargo --version)"
@@ -134,14 +134,14 @@ function Test-VisualStudioCpp {
 
 function Ensure-VisualStudioCpp {
   if (-not (Test-VisualStudioCpp)) {
-    Write-Host "Visual Studio C++ Build Tools не найдены. Установка может занять 10–30 минут..." -ForegroundColor DarkCyan
+    Write-Host "Visual Studio C++ Build Tools were not found. Installation may take 10-30 minutes..." -ForegroundColor DarkCyan
     Install-WingetPackage "Microsoft.VisualStudio.2022.BuildTools" @(
       "--override",
       "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
     )
   }
   if (-not (Test-VisualStudioCpp)) {
-    throw "Visual Studio C++ Build Tools не подтверждены. Установите workload Desktop development with C++ и повторите запуск."
+    throw "Visual Studio C++ Build Tools were not confirmed. Install the Desktop development with C++ workload and try again."
   }
   Write-Ok "Visual Studio C++ Build Tools"
 }
@@ -159,7 +159,7 @@ function Ensure-WebView2 {
     Install-WingetPackage "Microsoft.EdgeWebView2Runtime"
   }
   if (-not (Test-WebView2)) {
-    throw "WebView2 Runtime не найден после установки. Перезагрузите Windows и повторите запуск."
+    throw "WebView2 Runtime was not found after installation. Restart Windows and try again."
   }
   Write-Ok "Microsoft Edge WebView2 Runtime"
 }
@@ -179,44 +179,44 @@ function Ensure-VcRuntime {
 
 function Ensure-ProjectDependencies {
   Set-Location $projectRoot
-  Write-Host "Установка зависимостей проекта через Bun..." -ForegroundColor DarkCyan
+  Write-Host "Installing project dependencies with Bun..." -ForegroundColor DarkCyan
   & bun install
-  if ($LASTEXITCODE -ne 0) { throw "bun install завершился с ошибкой." }
-  Write-Ok "Зависимости проекта установлены"
+  if ($LASTEXITCODE -ne 0) { throw "bun install failed." }
+  Write-Ok "Project dependencies installed"
 
   & bunx tauri --version
-  if ($LASTEXITCODE -ne 0) { throw "Tauri CLI недоступен через bunx." }
-  Write-Ok "Tauri CLI доступен"
+  if ($LASTEXITCODE -ne 0) { throw "Tauri CLI is not available through bunx." }
+  Write-Ok "Tauri CLI available"
 }
 
 function Test-ProjectConfiguration {
   $envFiles = @(".env", ".env.local") | Where-Object { Test-Path (Join-Path $projectRoot $_) }
   if ($envFiles.Count -eq 0) {
-    Write-Warn "Файл .env/.env.local не найден. Секреты не создаются автоматически; добавьте VITE_CONVEX_URL через Keys/API keys перед cloud-функциями."
+    Write-Warn "No .env/.env.local file found. Secrets are not created automatically; configure VITE_CONVEX_URL through the project Keys/API keys settings before using cloud features."
   } else {
-    Write-Ok "Конфигурационный файл проекта найден"
+    Write-Ok "Project configuration file found"
   }
 }
 
 function Build-Project {
   Set-Location $projectRoot
-  Write-Step "Проверка TypeScript"
+  Write-Step "TypeScript check"
   & bunx tsc -b --noEmit
-  if ($LASTEXITCODE -ne 0) { throw "TypeScript-проверка завершилась с ошибкой." }
+  if ($LASTEXITCODE -ne 0) { throw "TypeScript check failed." }
 
-  Write-Step "Unit-тесты"
+  Write-Step "Unit tests"
   & bun test
-  if ($LASTEXITCODE -ne 0) { throw "Unit-тесты завершились с ошибкой." }
+  if ($LASTEXITCODE -ne 0) { throw "Unit tests failed." }
 
-  Write-Step "Web-сборка"
+  Write-Step "Web build"
   & bun run build
-  if ($LASTEXITCODE -ne 0) { throw "Web-сборка завершилась с ошибкой." }
+  if ($LASTEXITCODE -ne 0) { throw "Web build failed." }
 
-  Write-Step "Tauri installer"
+  Write-Step "Tauri installer build"
   & bunx tauri build
-  if ($LASTEXITCODE -ne 0) { throw "Сборка Tauri installer завершилась с ошибкой." }
+  if ($LASTEXITCODE -ne 0) { throw "Tauri installer build failed." }
 
-  Write-Ok "Инсталляторы созданы в src-tauri\target\release\bundle"
+  Write-Ok "Installers created in src-tauri\target\release\bundle"
 }
 
 try {
@@ -226,24 +226,24 @@ try {
 
   Write-Host ""
   Write-Host "========================================" -ForegroundColor Blue
-  Write-Host "     RBuilder: установка окружения" -ForegroundColor Blue
+  Write-Host "     RBuilder environment installer" -ForegroundColor Blue
   Write-Host "========================================" -ForegroundColor Blue
 
-  Write-Step "Проверка Windows и пакетного менеджера"
-  if ([Environment]::OSVersion.Platform -ne "Win32NT") { throw "Этот скрипт предназначен только для Windows." }
+  Write-Step "Windows and package manager"
+  if ([Environment]::OSVersion.Platform -ne "Win32NT") { throw "This script only runs on Windows." }
   Ensure-Winget
 
-  Write-Step "Базовые инструменты"
+  Write-Step "Base tools"
   Ensure-Git
   Ensure-Bun
   Ensure-Rust
 
-  Write-Step "Компоненты Tauri Desktop"
+  Write-Step "Tauri Desktop components"
   Ensure-VisualStudioCpp
   Ensure-WebView2
   Ensure-VcRuntime
 
-  Write-Step "Проект RBuilder"
+  Write-Step "RBuilder project"
   Ensure-ProjectDependencies
   Test-ProjectConfiguration
 
@@ -254,18 +254,18 @@ try {
   Write-Host ""
   Write-Host "========================================" -ForegroundColor Green
   if ($Build) {
-    Write-Host " Установка и сборка RBuilder завершены" -ForegroundColor Green
+    Write-Host " RBuilder installation and build complete" -ForegroundColor Green
   } else {
-    Write-Host " Установка окружения RBuilder завершена" -ForegroundColor Green
+    Write-Host " RBuilder environment setup complete" -ForegroundColor Green
   }
   Write-Host "========================================" -ForegroundColor Green
   if (-not $Build) {
-    Write-Host "Для сборки установщика запустите install-rbuilder-windows.bat или build-windows.bat."
+    Write-Host "Run install-rbuilder-windows.bat or build-windows.bat to build the installer."
   }
   exit 0
 } catch {
   Write-Host ""
   Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
-  Write-Host "Установка остановлена. Исправьте указанную проблему и запустите скрипт снова." -ForegroundColor Yellow
+  Write-Host "Setup stopped. Fix the issue above and run the installer again." -ForegroundColor Yellow
   exit 1
 }

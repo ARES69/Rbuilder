@@ -1,11 +1,9 @@
 @echo off
 setlocal EnableExtensions
-
-chcp 65001 >nul 2>nul
 cd /d "%~dp0"
 
 if not exist "%~dp0setup-windows.ps1" (
-  echo [ERROR] setup-windows.ps1 не найден рядом с build-windows.bat.
+  echo [ERROR] setup-windows.ps1 was not found next to build-windows.bat.
   pause
   exit /b 1
 )
@@ -15,7 +13,7 @@ set "EXIT_CODE=%ERRORLEVEL%"
 
 if "%EXIT_CODE%"=="0" (
   echo.
-  echo Установщик создан в:
+  echo Installers were created in:
   echo   src-tauri\target\release\bundle\msi
   echo   src-tauri\target\release\bundle\nsis
 )

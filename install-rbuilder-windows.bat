@@ -1,7 +1,5 @@
 @echo off
 setlocal EnableExtensions
-
-chcp 65001 >nul 2>nul
 cd /d "%~dp0"
 
 echo.
@@ -9,17 +7,17 @@ echo ========================================
 echo   RBuilder Full Windows Installer
 echo ========================================
 echo.
-echo Скрипт проверит и при необходимости установит:
+echo This installer checks and installs:
 echo   Git, Bun, Rust MSVC, Visual Studio C++,
-echo   WebView2, VC++ Runtime и зависимости проекта.
-echo Затем будет создан Tauri installer.
+echo   WebView2, VC++ Runtime and project packages.
+echo Then it builds the RBuilder Tauri installer.
 echo.
-echo Требуется интернет и права администратора.
+echo Internet access and administrator rights are required.
 echo.
 
 where powershell.exe >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] Windows PowerShell не найден.
+  echo [ERROR] Windows PowerShell was not found.
   pause
   exit /b 1
 )
@@ -29,9 +27,9 @@ set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.
 if not "%EXIT_CODE%"=="0" (
-  echo Установка завершилась с ошибкой. Код: %EXIT_CODE%
+  echo Installation failed. Exit code: %EXIT_CODE%
 ) else (
-  echo Установка и сборка успешно завершены.
+  echo Installation and build completed successfully.
 )
 echo.
 pause
