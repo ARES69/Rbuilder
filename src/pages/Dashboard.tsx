@@ -126,7 +126,7 @@ export default function Dashboard() {
   const [previewKey, setPreviewKey] = useState(0);
   const [mobileTab, setMobileTab] = useState<"chat" | "preview">("chat");
   const [pendingModel, setPendingModel] = useState<string | undefined>(undefined);
-  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("preview");
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("code");
   const [sidebarSection, setSidebarSection] = useState<SidebarSection>("chat");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const session = useSessionStatus();
@@ -1126,7 +1126,23 @@ export default function Dashboard() {
             {chatPanel}
           </ResizablePanel>
           <ResizableHandle />
-          <ResizablePanel defaultSize={47}>{workspaceContent}</ResizablePanel>
+          <ResizablePanel defaultSize={64} minSize={48}>
+            <ResizablePanelGroup direction="horizontal" className="h-full">
+              <ResizablePanel defaultSize={52} minSize={34}>
+                <div className="flex h-full min-h-0 flex-col border-r border-border/70">
+                  {workspaceContent}
+                </div>
+              </ResizablePanel>
+              <ResizableHandle withHandle />
+              <ResizablePanel defaultSize={48} minSize={34}>
+                <div className="h-full min-h-0 p-2">
+                  <div className="h-full overflow-hidden rounded-xl border border-border/70 bg-[#071728] shadow-[0_14px_50px_rgba(0,0,0,0.22)]">
+                    {previewPanel}
+                  </div>
+                </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ResizablePanel>
         </ResizablePanelGroup>
       )}
     </main>
