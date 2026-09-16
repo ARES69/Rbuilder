@@ -9,6 +9,9 @@ declare global {
     __RBULDER_DESKTOP__?: {
       invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
     };
+    __TAURI_INTERNALS__?: {
+      invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+    };
 
     /**
      * Navigate to the auth page with a custom redirect URL

@@ -79,7 +79,7 @@ type TauriLikeInvoke = (command: string, args?: Record<string, unknown>) => Prom
 
 function getInvoke(): TauriLikeInvoke | null {
   if (typeof window === "undefined") return null;
-  return window.__RBULDER_DESKTOP__?.invoke ?? null;
+  return window.__RBULDER_DESKTOP__?.invoke ?? window.__TAURI_INTERNALS__?.invoke ?? null;
 }
 
 function createDesktopBridge(invoke: TauriLikeInvoke): DesktopBridge {
