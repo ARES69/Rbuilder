@@ -76,6 +76,20 @@ const schema = defineSchema(
       .index("by_project", ["projectId"])
       .index("by_project_path", ["projectId", "path"]),
 
+    // Immutable project checkpoints used for diff and rollback.
+    projectVersions: defineTable({
+      projectId: v.id("projects"),
+      version: v.number(),
+      files: v.array(
+        v.object({
+          path: v.string(),
+          content: v.string(),
+          language: v.optional(v.string()),
+        }),
+      ),
+      reason: v.optional(v.string()),
+    }).index("by_project", ["projectId"]),
+
     attachments: defineTable({
       projectId: v.id("projects"),
       name: v.string(),

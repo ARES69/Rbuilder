@@ -36,6 +36,28 @@ export const commit = mutation({
     const previousVersion = project.version ?? 0;
     const version = demo ? previousVersion : previousVersion + 1;
 
+    if (!demo && previousVersion > 0) {
+      const currentFiles = await ctx.db
+        .query("projectFiles")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect();
+      const snapshotFiles = currentFiles.length
+        ? currentFiles.map((file) => ({
+            path: file.path,
+            content: file.content,
+            language: file.language,
+          }))
+        : project.html
+          ? [{ path: "index.html", content: project.html, language: "html" }]
+          : [];
+      await ctx.db.insert("projectVersions", {
+        projectId,
+        version: previousVersion,
+        files: snapshotFiles,
+        reason: "Перед генерацией новой версии",
+      });
+    }
+
     // A provider fallback is useful feedback, but must not replace an existing
     // real build or pretend that a new version was published.
     if (!demo || !project.html) {

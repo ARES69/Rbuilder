@@ -5,6 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { KEYLESS_LABEL } from "@/lib/research";
 import { toast } from "sonner";
@@ -17,6 +25,7 @@ import {
   Database,
   Download,
   FolderTree,
+  History,
   KeyRound,
   Loader2,
   Paperclip,
@@ -39,11 +48,17 @@ export function CodePanel({
   const [draft, setDraft] = useState("");
   const [draftPath, setDraftPath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const files = useQuery(
     api.projectFiles.list,
     projectId ? { projectId } : "skip",
   );
   const saveFile = useMutation(api.projectFiles.upsert);
+  const restoreVersion = useMutation(api.projectVersions.restore);
+  const versions = useQuery(
+    api.projectVersions.list,
+    projectId ? { projectId } : "skip",
+  );
   const selectedFile = files?.find((file) => file.path === selectedPath);
   const content = selectedFile?.content ?? html;
 
@@ -109,6 +124,18 @@ export function CodePanel({
           </span>
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground"
+            onClick={() => setHistoryOpen(true)}
+            disabled={!projectId || !versions?.length}
+            aria-label="История версий"
+            title="История версий"
+          >
+            <History className="size-3.5" />
+          </Button>
           <Button
             type="button"
             variant="ghost"
@@ -197,6 +224,51 @@ export function CodePanel({
           />
         </div>
       </div>
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <History className="size-4" />
+              История версий
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Восстановление заменит текущие файлы проекта выбранным checkpoint.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[45vh] space-y-2 overflow-y-auto">
+            {versions?.map((version) => (
+              <div key={version._id} className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Версия v{version.version}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {version.files.length} файлов · {version.reason ?? "checkpoint"}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 text-xs"
+                  onClick={() => {
+                    if (!projectId) return;
+                    void restoreVersion({ projectId, versionId: version._id })
+                      .then(() => {
+                        setHistoryOpen(false);
+                        toast.success(`Версия v${version.version} восстановлена`);
+                      })
+                      .catch((error) => toast.error(error instanceof Error ? error.message : "Не удалось восстановить версию"));
+                  }}
+                >
+                  Восстановить
+                </Button>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setHistoryOpen(false)}>Закрыть</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

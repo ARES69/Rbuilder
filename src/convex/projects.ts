@@ -85,6 +85,14 @@ export const remove = mutation({
       await ctx.db.delete(message._id);
     }
 
+    const projectVersions = await ctx.db
+      .query("projectVersions")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect();
+    for (const version of projectVersions) {
+      await ctx.db.delete(version._id);
+    }
+
     const projectFiles = await ctx.db
       .query("projectFiles")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
