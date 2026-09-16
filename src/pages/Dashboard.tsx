@@ -27,6 +27,14 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
@@ -47,6 +55,7 @@ import { useMutation, useQuery, useConvex } from "convex/react";
 import { useNavigate } from "react-router";
 import {
   ChevronDown,
+  ClipboardList,
   ExternalLink,
   FileText,
   Loader2,
@@ -92,6 +101,9 @@ export default function Dashboard() {
     useState<Id<"projects"> | null>(null);
 
   const [input, setInput] = useState("");
+  const [approvedPlan, setApprovedPlan] = useState<string | null>(null);
+  const [planDraft, setPlanDraft] = useState<string | null>(null);
+  const [planning, setPlanning] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [generating, setGenerating] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
@@ -181,9 +193,29 @@ export default function Dashboard() {
     }
   };
 
+  const handleCreatePlan = async () => {
+    const content = input.trim();
+    if (!content || planning || generating) return;
+    setPlanning(true);
+    try {
+      const result = await convex.action(api.generation.plan, {
+        prompt: content,
+        modelId: selectedProject?.model ?? pendingModel,
+      });
+      setPlanDraft(result.plan);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось составить план");
+    } finally {
+      setPlanning(false);
+    }
+  };
+
   const handleSend = async () => {
     const content = input.trim();
     if (!content || generating || authLoading) return;
+    const request = approvedPlan
+      ? `${content}\n\nУТВЕРЖДЁННЫЙ ПЛАН ПРОЕКТА:\n${approvedPlan}`
+      : content;
 
     const model = getModel(selectedProject?.model ?? pendingModel);
     const remaining = session ? session.limit - session.used : null;
@@ -205,7 +237,7 @@ export default function Dashboard() {
       if (!projectId) {
         projectId = await convex.mutation(api.projects.create, {
           name: "Untitled app",
-          prompt: content,
+          prompt: request,
           model: model.id,
         });
         setSelectedProjectId(projectId);
@@ -247,13 +279,13 @@ export default function Dashboard() {
 
       await sendMessage({
         projectId,
-        content,
+        content: request,
         attachmentIds: attachmentIds.length ? attachmentIds : undefined,
       });
 
       const previous = await convex.query(api.projects.get, { projectId });
       const result = await convex.action(api.generation.run, {
-        prompt: content,
+        prompt: request,
         modelId: model.id,
         previousHtml: previous?.html ?? undefined,
         attachmentIds: attachmentIds.length ? attachmentIds : undefined,
@@ -279,6 +311,7 @@ export default function Dashboard() {
       if (model.costsSession && !result.demo) {
         await convex.mutation(api.sessions.consume, { day: todayKey });
       }
+      setApprovedPlan(null);
       setPreviewKey((k) => k + 1);
       toast.success(result.demo ? "Демо-режим: добавьте ключ модели" : "Сборка завершена");
     } catch (error) {
@@ -408,6 +441,23 @@ export default function Dashboard() {
           </div>
         )}
 
+        {approvedPlan ? (
+          <div className="mb-2 flex items-center justify-between rounded-md border border-foreground/20 bg-accent/40 px-2.5 py-1.5 text-[11px]">
+            <span className="flex items-center gap-1.5 text-foreground">
+              <ClipboardList className="size-3.5" /> План утверждён
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[10px] text-muted-foreground"
+              onClick={() => setApprovedPlan(null)}
+            >
+              Убрать
+            </Button>
+          </div>
+        ) : null}
+
         <Textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -448,6 +498,18 @@ export default function Dashboard() {
               variant="ghost"
               size="sm"
               className="h-8 gap-1.5 text-muted-foreground"
+              onClick={() => void handleCreatePlan()}
+              disabled={generating || planning || !input.trim()}
+              title="Сначала составить план проекта"
+            >
+              {planning ? <Loader2 className="size-3.5 animate-spin" /> : <ClipboardList className="size-3.5" />}
+              План
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-muted-foreground"
               onClick={() => fileInputRef.current?.click()}
               disabled={generating}
             >
@@ -477,6 +539,40 @@ export default function Dashboard() {
           </Button>
         </div>
       </div>
+
+      <Dialog open={planDraft !== null} onOpenChange={(open) => !open && setPlanDraft(null)}>
+        <DialogContent className="max-h-[80vh] sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <ClipboardList className="size-4" />
+              План проекта
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Проверьте предпроектный анализ перед генерацией. Утверждённый план будет передан builder-агенту.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[48vh] overflow-y-auto rounded-md border border-border/70 bg-muted/30 p-3">
+            <pre className="whitespace-pre-wrap text-xs leading-5 text-foreground/90">{planDraft}</pre>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setPlanDraft(null)}>
+              Изменить запрос
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                if (!planDraft) return;
+                setApprovedPlan(planDraft);
+                setPlanDraft(null);
+                toast.success("План утверждён — можно запускать сборку");
+              }}
+            >
+              Утвердить план
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 

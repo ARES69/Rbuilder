@@ -90,6 +90,42 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+const PLANNING_PROMPT = `You are the solution architect for RBuilder. Analyze the user's product request and return a concise Russian project plan with exactly these sections:
+Цель:
+Пользователи:
+Экраны:
+Данные:
+Интеграции:
+Этапы:
+Риски:
+Use concrete names, avoid generic filler, and keep the whole answer under 1800 characters.`;
+
+function fallbackPlan(prompt: string): string {
+  return `Цель:\nСоздать рабочее веб-приложение по запросу пользователя.\n\nПользователи:\nОпределяются ролями и сценариями из запроса.\n\nЭкраны:\nГлавный экран, рабочий раздел, настройки и состояния загрузки/ошибок.\n\nДанные:\nОсновные сущности приложения, записи пользователя и настройки проекта.\n\nИнтеграции:\nПодключать только те сервисы, которые нужны запросу: API-ключи хранятся на сервере.\n\nЭтапы:\n1. Создать структуру экранов.\n2. Добавить состояние и основные действия.\n3. Подключить данные и интеграции.\n4. Проверить адаптивность и ошибки.\n\nРиски:\nНужно уточнить роли, реальные источники данных и требования к публикации.\n\nЗапрос:\n${prompt}`;
+}
+
+export const plan = action({
+  args: {
+    prompt: v.string(),
+    modelId: v.optional(v.string()),
+  },
+  handler: async (ctx, { prompt, modelId }) => {
+    const user = await ctx.runQuery(api.users.currentUser);
+    if (!user) throw new Error("Not authenticated");
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return { plan: fallbackPlan(prompt), demo: true };
+    const model = getModel(modelId);
+    const planText = await callModel(
+      apiKey,
+      model.apiModel,
+      PLANNING_PROMPT,
+      `Запрос пользователя:\n${prompt}`,
+      900,
+    );
+    return { plan: planText.trim() || fallbackPlan(prompt), demo: false };
+  },
+});
+
 /** Deterministic fallback app shown when no model API key is configured. */
 function fallbackHtml(prompt: string): string {
   return `<!DOCTYPE html>
