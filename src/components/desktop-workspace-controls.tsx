@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, Download, FileCode2, FolderOpen, GitBranch, GitCommitHorizontal, Loader2, RefreshCw, Save, Terminal, Upload } from "lucide-react";
+import { Archive, Download, FileCode2, FolderOpen, GitBranch, GitCommitHorizontal, Loader2, Plus, RefreshCw, Save, Search, Terminal, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -46,6 +46,8 @@ export function DesktopWorkspaceControls() {
   const [fileContent, setFileContent] = useState("");
   const [fileLoading, setFileLoading] = useState(false);
   const [fileSaving, setFileSaving] = useState(false);
+  const [fileSearch, setFileSearch] = useState("");
+  const [newFilePath, setNewFilePath] = useState("");
   const [pendingAction, setPendingAction] = useState<{
     title: string;
     description: string;
@@ -172,6 +174,59 @@ export function DesktopWorkspaceControls() {
     } finally {
       setFileLoading(false);
     }
+  };
+
+  const safeLocalPath = (relativePath: string) => {
+    const path = relativePath.trim().split("\\\\").join("/").replace(/^\/+/, "");
+    if (!path || path.includes("..") || path.startsWith(".git/") || path.startsWith("node_modules/") || path === ".env" || path.startsWith(".env.")) return null;
+    if (!root) return null;
+    const cleanRoot = root.endsWith("/") || root.endsWith("\\") ? root.slice(0, -1) : root;
+    return `${cleanRoot}/${path}`;
+  };
+
+  const createFile = async () => {
+    const path = safeLocalPath(newFilePath);
+    if (!runtime.available || !path) {
+      toast.error("Укажите безопасный путь файла, например src/App.tsx");
+      return;
+    }
+    setFileSaving(true);
+    try {
+      await runtime.writeFile(path, "");
+      setNewFilePath("");
+      if (root) {
+        const entries = (await runtime.listFiles(root)).filter((entry) => entry.kind === "file");
+        setFiles(entries);
+      }
+      toast.success("Файл создан");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось создать файл");
+    } finally {
+      setFileSaving(false);
+    }
+  };
+
+  const deleteSelectedFile = () => {
+    if (!runtime.available || !selectedFile) return;
+    setPendingAction({
+      title: "Удалить файл?",
+      description: `Файл «${selectedFile}» будет удалён с локального диска. Это действие нельзя отменить автоматически.`,
+      run: async () => {
+        setFileSaving(true);
+        try {
+          await runtime.deleteFile(selectedFile);
+          const nextFiles = root ? (await runtime.listFiles(root)).filter((entry) => entry.kind === "file") : [];
+          setFiles(nextFiles);
+          setSelectedFile(nextFiles[0]?.path ?? null);
+          setFileContent(nextFiles[0] ? await runtime.readFile(nextFiles[0].path) : "");
+          toast.success("Файл удалён");
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Не удалось удалить файл");
+        } finally {
+          setFileSaving(false);
+        }
+      },
+    });
   };
 
   const saveFile = async () => {
@@ -406,19 +461,32 @@ export function DesktopWorkspaceControls() {
             <DialogDescription className="truncate text-xs">{root ?? "не подключены"}</DialogDescription>
           </DialogHeader>
           <div className="grid min-h-0 gap-3 md:grid-cols-[minmax(0,0.35fr)_minmax(0,0.65fr)]">
-            <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border/70 p-2">
-              {files.length ? files.map((entry) => (
+            <div className="min-h-0 rounded-md border border-border/70 p-2">
+              <div className="mb-2 flex items-center gap-1.5 rounded border border-border/60 px-2">
+                <Search className="size-3 text-muted-foreground" />
+                <Input value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="Поиск файлов" className="h-7 border-0 px-0 text-xs shadow-none focus-visible:ring-0" />
+              </div>
+              <div className="max-h-[45vh] overflow-y-auto">
+              {files.filter((entry) => !fileSearch.trim() || entry.path.toLowerCase().includes(fileSearch.trim().toLowerCase())).length ? files.filter((entry) => !fileSearch.trim() || entry.path.toLowerCase().includes(fileSearch.trim().toLowerCase())).map((entry) => (
                 <button key={entry.path} type="button" onClick={() => void selectFile(entry.path)} className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs ${selectedFile === entry.path ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/50"}`}>
                   <FileCode2 className="size-3.5 shrink-0" /><span className="truncate" title={entry.path}>{entry.path}</span>
                 </button>
               )) : <p className="p-2 text-xs text-muted-foreground">Файлы не найдены</p>}
+              </div>
+              <div className="mt-2 flex gap-1.5 border-t border-border/60 pt-2">
+                <Input value={newFilePath} onChange={(event) => setNewFilePath(event.target.value)} placeholder="src/NewFile.tsx" className="h-7 text-[10px]" />
+                <Button type="button" variant="outline" size="icon-sm" onClick={() => void createFile()} disabled={fileSaving || !newFilePath.trim()} title="Создать файл"><Plus className="size-3.5" /></Button>
+              </div>
             </div>
             <div className="min-w-0 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-xs font-medium">{selectedFile ?? "Выберите файл"}</span>
-                <Button type="button" size="sm" onClick={() => void saveFile()} disabled={fileSaving || fileLoading || !selectedFile}>
-                  {fileSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} Сохранить
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button type="button" variant="outline" size="icon-sm" onClick={deleteSelectedFile} disabled={fileSaving || !selectedFile} title="Удалить файл"><Trash2 className="size-3.5" /></Button>
+                  <Button type="button" size="sm" onClick={() => void saveFile()} disabled={fileSaving || fileLoading || !selectedFile}>
+                    {fileSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} Сохранить
+                  </Button>
+                </div>
               </div>
               <Textarea value={fileContent} onChange={(event) => setFileContent(event.target.value)} disabled={fileLoading || !selectedFile} className="min-h-[48vh] resize-none font-mono text-xs leading-5" spellCheck={false} />
               <p className="text-[10px] text-muted-foreground">Сохранение изменяет файл на локальном диске и появится в Git diff.</p>

@@ -33,6 +33,7 @@ export interface DesktopBridge {
   listFiles(root: string): Promise<DesktopFileEntry[]>;
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  deleteFile(path: string): Promise<void>;
   gitStatus(root: string): Promise<GitStatus>;
   gitDiff(root: string): Promise<string>;
   gitCommit(root: string, message: string): Promise<CommandResult>;
@@ -60,6 +61,7 @@ export const DESKTOP_COMMANDS = {
   listFiles: "workspace_list_files",
   readFile: "workspace_read_file",
   writeFile: "workspace_write_file",
+  deleteFile: "workspace_delete_file",
   gitStatus: "git_status",
   gitDiff: "git_diff",
   gitCommit: "git_commit",
@@ -91,6 +93,7 @@ function createDesktopBridge(invoke: TauriLikeInvoke): DesktopBridge {
     listFiles: (root) => call<DesktopFileEntry[]>(DESKTOP_COMMANDS.listFiles, { root }),
     readFile: (path) => call<string>(DESKTOP_COMMANDS.readFile, { path }),
     writeFile: (path, content) => call<void>(DESKTOP_COMMANDS.writeFile, { path, content }),
+    deleteFile: (path) => call<void>(DESKTOP_COMMANDS.deleteFile, { path }),
     gitStatus: (root) => call<GitStatus>(DESKTOP_COMMANDS.gitStatus, { root }),
     gitDiff: (root) => call<string>(DESKTOP_COMMANDS.gitDiff, { root }),
     gitCommit: (root, message) => call<CommandResult>(DESKTOP_COMMANDS.gitCommit, { root, message }),

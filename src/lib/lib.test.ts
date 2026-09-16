@@ -234,6 +234,7 @@ describe("desktop bridge", () => {
       "workspace_list_files",
       "workspace_read_file",
       "workspace_write_file",
+      "workspace_delete_file",
       "git_status",
       "git_diff",
       "git_commit",
