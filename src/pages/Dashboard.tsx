@@ -25,6 +25,7 @@ import { ToolsPanel } from "@/components/tools-panel";
 import { resolveEnabledTools } from "@/lib/tools";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { DesktopStatus } from "@/components/desktop-status";
+import { DesktopWorkspaceControls } from "@/components/desktop-workspace-controls";
 import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -1016,6 +1017,7 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-1">
+          <DesktopWorkspaceControls />
           <DesktopStatus />
           {user?.role === "admin" ? (
             <Button
