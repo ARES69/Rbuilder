@@ -36,6 +36,12 @@ export interface DesktopBridge {
   gitStatus(root: string): Promise<GitStatus>;
   gitDiff(root: string): Promise<string>;
   gitCommit(root: string, message: string): Promise<CommandResult>;
+  gitBranches(root: string): Promise<string[]>;
+  gitCheckout(root: string, branch: string): Promise<CommandResult>;
+  gitCreateBranch(root: string, branch: string): Promise<CommandResult>;
+  gitPull(root: string): Promise<CommandResult>;
+  gitPush(root: string): Promise<CommandResult>;
+  gitStash(root: string): Promise<CommandResult>;
   runCommand(root: string, command: string, args?: string[]): Promise<CommandResult>;
   startPreview(root: string, command?: string): Promise<{ url: string; pid?: number }>;
 }
@@ -57,6 +63,12 @@ export const DESKTOP_COMMANDS = {
   gitStatus: "git_status",
   gitDiff: "git_diff",
   gitCommit: "git_commit",
+  gitBranches: "git_branches",
+  gitCheckout: "git_checkout",
+  gitCreateBranch: "git_create_branch",
+  gitPull: "git_pull",
+  gitPush: "git_push",
+  gitStash: "git_stash",
   runCommand: "terminal_run",
   startPreview: "preview_start",
 } as const;
@@ -82,6 +94,12 @@ function createDesktopBridge(invoke: TauriLikeInvoke): DesktopBridge {
     gitStatus: (root) => call<GitStatus>(DESKTOP_COMMANDS.gitStatus, { root }),
     gitDiff: (root) => call<string>(DESKTOP_COMMANDS.gitDiff, { root }),
     gitCommit: (root, message) => call<CommandResult>(DESKTOP_COMMANDS.gitCommit, { root, message }),
+    gitBranches: (root) => call<string[]>(DESKTOP_COMMANDS.gitBranches, { root }),
+    gitCheckout: (root, branch) => call<CommandResult>(DESKTOP_COMMANDS.gitCheckout, { root, branch }),
+    gitCreateBranch: (root, branch) => call<CommandResult>(DESKTOP_COMMANDS.gitCreateBranch, { root, branch }),
+    gitPull: (root) => call<CommandResult>(DESKTOP_COMMANDS.gitPull, { root }),
+    gitPush: (root) => call<CommandResult>(DESKTOP_COMMANDS.gitPush, { root }),
+    gitStash: (root) => call<CommandResult>(DESKTOP_COMMANDS.gitStash, { root }),
     runCommand: (root, command, args = []) =>
       call<CommandResult>(DESKTOP_COMMANDS.runCommand, { root, command, args }),
     startPreview: (root, command = "bun run dev") =>

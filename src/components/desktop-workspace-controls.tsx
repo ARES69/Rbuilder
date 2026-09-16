@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { FolderOpen, GitBranch, Loader2, RefreshCw, GitCommitHorizontal } from "lucide-react";
+import { Archive, Download, FolderOpen, GitBranch, GitCommitHorizontal, Loader2, RefreshCw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -20,17 +21,21 @@ export function DesktopWorkspaceControls() {
   const [git, setGit] = useState<GitStatus | null>(null);
   const [diff, setDiff] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
+  const [branches, setBranches] = useState<string[]>([]);
+  const [newBranch, setNewBranch] = useState("");
   const [gitOpen, setGitOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [gitLoading, setGitLoading] = useState(false);
 
   const refreshGit = async (workspaceRoot: string) => {
-    const [status, nextDiff] = await Promise.all([
+    const [status, nextDiff, nextBranches] = await Promise.all([
       runtime.available ? runtime.gitStatus(workspaceRoot) : Promise.resolve(null),
       runtime.available ? runtime.gitDiff(workspaceRoot) : Promise.resolve(""),
+      runtime.available ? runtime.gitBranches(workspaceRoot) : Promise.resolve([]),
     ]);
     setGit(status);
     setDiff(nextDiff);
+    setBranches(nextBranches);
   };
 
   const openWorkspace = async () => {
@@ -66,6 +71,36 @@ export function DesktopWorkspaceControls() {
     } finally {
       setGitLoading(false);
     }
+  };
+
+  const runGitAction = async (
+    action: () => Promise<{ code: number; stderr: string }>,
+    successMessage: string,
+  ) => {
+    if (!runtime.available || !root) return;
+    setGitLoading(true);
+    try {
+      const result = await action();
+      if (result.code !== 0) throw new Error(result.stderr || "Git operation failed");
+      await refreshGit(root);
+      toast.success(successMessage);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Git operation failed");
+    } finally {
+      setGitLoading(false);
+    }
+  };
+
+  const checkoutBranch = (branch: string) => {
+    if (!branch || !root) return;
+    void runGitAction(() => runtime.available ? runtime.gitCheckout(root, branch) : Promise.reject(new Error("Desktop bridge недоступен")), `Ветка ${branch} выбрана`);
+  };
+
+  const createBranch = () => {
+    const branch = newBranch.trim();
+    if (!branch || !root) return;
+    void runGitAction(() => runtime.available ? runtime.gitCreateBranch(root, branch) : Promise.reject(new Error("Desktop bridge недоступен")), `Ветка ${branch} создана`);
+    setNewBranch("");
   };
 
   const commit = async () => {
@@ -143,6 +178,38 @@ export function DesktopWorkspaceControls() {
             <Button type="button" variant="ghost" size="icon-sm" onClick={() => root && void openGit()} disabled={gitLoading} aria-label="Обновить Git status">
               <RefreshCw className={gitLoading ? "size-3.5 animate-spin" : "size-3.5"} />
             </Button>
+          </div>
+          <div className="grid gap-3 rounded-md border border-border/70 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="space-y-2">
+              <p className="text-xs font-medium">Ветки</p>
+              <div className="flex gap-2">
+                <select
+                  value={git?.branch ?? ""}
+                  onChange={(event) => checkoutBranch(event.target.value)}
+                  disabled={gitLoading || !branches.length}
+                  className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs"
+                  aria-label="Текущая Git-ветка"
+                >
+                  {branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
+                </select>
+                <Button type="button" variant="outline" size="icon-sm" onClick={() => void runGitAction(() => runtime.available && root ? runtime.gitPull(root) : Promise.reject(new Error("Desktop bridge недоступен")), "Изменения получены")} disabled={gitLoading} title="Pull">
+                  <Download className="size-3.5" />
+                </Button>
+                <Button type="button" variant="outline" size="icon-sm" onClick={() => void runGitAction(() => runtime.available && root ? runtime.gitPush(root) : Promise.reject(new Error("Desktop bridge недоступен")), "Изменения отправлены")} disabled={gitLoading} title="Push">
+                  <Upload className="size-3.5" />
+                </Button>
+                <Button type="button" variant="outline" size="icon-sm" onClick={() => void runGitAction(() => runtime.available && root ? runtime.gitStash(root) : Promise.reject(new Error("Desktop bridge недоступен")), "Изменения убраны в stash")} disabled={gitLoading} title="Stash">
+                  <Archive className="size-3.5" />
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Input value={newBranch} onChange={(event) => setNewBranch(event.target.value)} placeholder="Новая ветка" className="h-8 text-xs" />
+                <Button type="button" variant="outline" size="sm" onClick={createBranch} disabled={gitLoading || !newBranch.trim()}>Создать</Button>
+              </div>
+            </div>
+            <div className="rounded-md bg-muted/30 p-2 text-[10px] leading-4 text-muted-foreground">
+              Pull и Push выполняются только native runtime. Перед отправкой убедитесь, что remote настроен, а перед stash — что изменения можно временно убрать.
+            </div>
           </div>
           <div className="grid min-h-0 gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
             <div className="min-h-0 rounded-md border border-border/70 p-3">

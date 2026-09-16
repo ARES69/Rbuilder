@@ -237,6 +237,12 @@ describe("desktop bridge", () => {
       "git_status",
       "git_diff",
       "git_commit",
+      "git_branches",
+      "git_checkout",
+      "git_create_branch",
+      "git_pull",
+      "git_push",
+      "git_stash",
       "terminal_run",
       "preview_start",
     ]);
