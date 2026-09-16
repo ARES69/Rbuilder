@@ -387,11 +387,20 @@ export default function Dashboard() {
   };
 
   const openPreviewInTab = () => {
-    if (!selectedProject?.html) return;
+    if (!selectedProject?.html) return false;
     const blob = new Blob([selectedProject.html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
+    window.open(url, "_blank", "noopener,noreferrer");
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return true;
+  };
+
+  const handleDeploy = () => {
+    if (openPreviewInTab()) {
+      toast.info("Preview открыт. Production deploy подключается через Desktop/CI runtime.");
+    } else {
+      toast.info("Сначала создайте приложение — после сборки его можно будет открыть в preview.");
+    }
   };
 
   const signOutAndGoHome = async () => {
