@@ -233,9 +233,9 @@ function ServiceRow({
             size="sm"
             className="h-7 px-2 text-muted-foreground hover:text-destructive"
             onClick={() =>
-              void disconnect({ connectionId: connection._id as never }).then(() =>
-                toast.success(`${service.name} отключён`),
-              )
+              void disconnect({ connectionId: connection._id as never })
+                .then(() => toast.success(`${service.name} отключён`))
+                .catch(() => toast.error(`Не удалось отключить ${service.name}`))
             }
           >
             <Trash2 className="size-3.5" />
@@ -439,11 +439,14 @@ function ConnectionDetails({
                 size="sm"
                 className="h-7 px-2"
                 onClick={() => {
-                  void navigator.clipboard.writeText(webhookUrl).then(() => {
-                    setCopied(true);
-                    toast.success("URL скопирован");
-                    setTimeout(() => setCopied(false), 1500);
-                  });
+                  void navigator.clipboard
+                    .writeText(webhookUrl)
+                    .then(() => {
+                      setCopied(true);
+                      toast.success("URL скопирован");
+                      setTimeout(() => setCopied(false), 1500);
+                    })
+                    .catch(() => toast.error("Не удалось скопировать URL"));
                 }}
               >
                 {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -454,9 +457,9 @@ function ConnectionDetails({
                 className="h-7 px-2"
                 title="Сгенерировать новый ключ"
                 onClick={() =>
-                  void rotate({ connectionId: connection._id as never }).then(() =>
-                    toast.success("Новый webhook-ключ сгенерирован"),
-                  )
+                  void rotate({ connectionId: connection._id as never })
+                    .then(() => toast.success("Новый webhook-ключ сгенерирован"))
+                    .catch(() => toast.error("Не удалось обновить webhook-ключ"))
                 }
               >
                 <RefreshCw className="size-3.5" />

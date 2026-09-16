@@ -24,15 +24,23 @@ export const commit = mutation({
     const project = await ctx.db.get(projectId);
     if (!project || project.userId !== user._id) throw new Error("Not found");
 
-    const version = (project.version ?? 0) + 1;
-    await ctx.db.patch(projectId, { html, version });
+    const previousVersion = project.version ?? 0;
+    const version = demo ? previousVersion : previousVersion + 1;
+
+    // A provider fallback is useful feedback, but it must not replace an
+    // existing real build or pretend that a new version was published.
+    if (!demo || !project.html) {
+      await ctx.db.patch(projectId, { html, ...(demo ? {} : { version }) });
+    }
 
     await ctx.db.insert("messages", {
       projectId,
       role: "assistant",
       content: demo
-        ? `Demo build ready (v${version}) — add an OPENAI_API_KEY to run the full agent pipeline.`
-        : `Build complete — v${version} is live in the preview.`,
+        ? project.html
+          ? "Демо-режим: рабочая версия приложения сохранена. Добавьте ключ модели для полноценной сборки."
+          : "Демо-режим: добавьте ключ модели для полноценной сборки."
+        : `Сборка завершена — версия v${version} доступна в превью.`,
       trace,
     });
 

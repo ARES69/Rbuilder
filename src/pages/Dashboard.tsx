@@ -225,9 +225,16 @@ export default function Dashboard() {
           },
           body: staged.file,
         });
-        const { storageId } = (await response.json()) as {
-          storageId: Id<"_storage">;
+        if (!response.ok) {
+          throw new Error("Не удалось загрузить вложение");
+        }
+        const payload = (await response.json()) as {
+          storageId?: Id<"_storage">;
         };
+        if (!payload.storageId) {
+          throw new Error("Сервер не вернул идентификатор файла");
+        }
+        const { storageId } = payload;
         const attachmentId = await convex.mutation(api.attachments.create, {
           projectId,
           name: staged.file.name,
@@ -243,11 +250,6 @@ export default function Dashboard() {
         content,
         attachmentIds: attachmentIds.length ? attachmentIds : undefined,
       });
-
-      // Consume a daily session up front when the model is session-based.
-      if (model.costsSession) {
-        await convex.mutation(api.sessions.consume, { day: todayKey });
-      }
 
       const previous = await convex.query(api.projects.get, { projectId });
       const result = await convex.action(api.generation.run, {
@@ -268,13 +270,19 @@ export default function Dashboard() {
         demo: result.demo,
         trace: result.trace,
       });
+      // A demo/fallback result is not a billable generation. Consume only after
+      // a real build has completed, so missing or invalid provider keys do not
+      // spend a user's daily session.
+      if (model.costsSession && !result.demo) {
+        await convex.mutation(api.sessions.consume, { day: todayKey });
+      }
       setPreviewKey((k) => k + 1);
-      toast.success(result.demo ? "Demo build ready" : "Build complete");
+      toast.success(result.demo ? "Демо-режим: добавьте ключ модели" : "Сборка завершена");
     } catch (error) {
       toast.error(
         error instanceof Error
           ? error.message
-          : "Generation failed. Please try again.",
+          : "Сборка не удалась. Попробуйте ещё раз.",
       );
     } finally {
       setGenerating(false);
@@ -312,11 +320,11 @@ export default function Dashboard() {
                 <Sparkles className="size-4 text-muted-foreground" />
               </span>
               <p className="mt-4 text-sm font-medium">
-                Describe the app you want
+Опишите приложение, которое хотите создать
               </p>
               <p className="mt-1 max-w-xs text-xs leading-5 text-muted-foreground">
-                Plain language in — a working web app out, rendered in the
-                preview the moment it is written.
+Опишите идею обычными словами — рабочее веб-приложение появится
+                в превью сразу после сборки.
               </p>
             </div>
           ) : (
@@ -329,7 +337,7 @@ export default function Dashboard() {
                 )}
               >
                 <span className="text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                  {message.role === "user" ? "You" : "RBuilder"}
+                  {message.role === "user" ? "Вы" : "RBuilder"}
                 </span>
                 <div
                   className={cn(
@@ -406,7 +414,7 @@ export default function Dashboard() {
               void handleSend();
             }
           }}
-          placeholder="Describe your app… Enter to send"
+          placeholder="Опишите приложение… Enter — отправить"
           rows={3}
           className="max-h-40 min-h-16 resize-none rounded-lg border-border/80 bg-card text-sm shadow-none"
           disabled={generating}
@@ -441,11 +449,11 @@ export default function Dashboard() {
               disabled={generating}
             >
               <Paperclip className="size-3.5" />
-              Attach
+              Прикрепить
             </Button>
             {stagedFiles.length > 0 && (
               <span className="text-xs text-muted-foreground/70">
-                {stagedFiles.length} file{stagedFiles.length > 1 ? "s" : ""}
+                {stagedFiles.length} файл{stagedFiles.length > 1 ? "а" : ""}
                 {stagedSize > 0 && ` · ${formatSize(stagedSize)}`}
               </span>
             )}
@@ -462,7 +470,7 @@ export default function Dashboard() {
             ) : (
               <SendHorizontal className="size-3.5" />
             )}
-            Send
+            Отправить
           </Button>
         </div>
       </div>
@@ -474,7 +482,7 @@ export default function Dashboard() {
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/70 px-4">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Preview
+            Превью
           </span>
           {selectedProject && selectedProject.version > 0 && (
             <Badge
@@ -523,8 +531,8 @@ export default function Dashboard() {
             <Monitor className="size-5 text-muted-foreground/60" />
             <p className="mt-2 text-xs text-muted-foreground/70">
               {generating
-                ? "Rendering your app…"
-                : "Describe your app to see it here"}
+                ? "Рендерим приложение…"
+                : "Опишите приложение, чтобы увидеть его здесь"}
             </p>
           </div>
         )}
@@ -609,7 +617,7 @@ export default function Dashboard() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
               <DropdownMenuLabel className="text-xs text-muted-foreground">
-                Projects
+                Проекты
               </DropdownMenuLabel>
               {projects?.length ? (
                 projects.map((p) => (
@@ -629,7 +637,7 @@ export default function Dashboard() {
                 ))
               ) : (
                 <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                  No projects yet
+                  Пока нет проектов
                 </div>
               )}
               <DropdownMenuSeparator />
@@ -638,7 +646,7 @@ export default function Dashboard() {
                 onClick={() => void handleNewProject()}
               >
                 <Plus className="size-4" />
-                New project
+                Новый проект
               </DropdownMenuItem>
               {selectedProjectId && (
                 <DropdownMenuItem
@@ -646,7 +654,7 @@ export default function Dashboard() {
                   onClick={() => void handleDeleteProject()}
                 >
                   <X className="size-4" />
-                  Delete current project
+                  Удалить текущий проект
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -655,12 +663,12 @@ export default function Dashboard() {
           {generating && (
             <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
               <Loader2 className="size-3 animate-spin" />
-              building
+              сборка
             </span>
           )}
           {session && (
             <span className="hidden text-xs text-muted-foreground/70 sm:block">
-              {session.used}/{session.limit} sessions today
+              {session.used}/{session.limit} сессий сегодня
             </span>
           )}
         </div>
@@ -681,14 +689,14 @@ export default function Dashboard() {
           ) : null}
           <ThemeToggle />
           <span className="mr-1 hidden text-xs text-muted-foreground/70 sm:block">
-            {user?.email ?? "Guest"}
+            {user?.email ?? "Гость"}
           </span>
           <Button
             variant="ghost"
             size="icon"
             className="size-8 text-muted-foreground"
             onClick={() => void signOutAndGoHome()}
-            aria-label="Sign out"
+            aria-label="Выйти"
           >
             <LogOut className="size-4" />
           </Button>
@@ -703,8 +711,8 @@ export default function Dashboard() {
           className="flex min-h-0 flex-1 flex-col gap-0"
         >
           <TabsList className="mx-auto mt-2 w-fit">
-            <TabsTrigger value="chat">Chat</TabsTrigger>
-            <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsTrigger value="chat">Чат</TabsTrigger>
+            <TabsTrigger value="preview">Превью</TabsTrigger>
           </TabsList>
           <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
             <CapabilityChips onPick={seedComposer} />

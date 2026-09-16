@@ -25,7 +25,7 @@ import {
   UserRound,
   UserX,
 } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
 interface AuthProps {
@@ -60,10 +60,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   // instead of the regular dashboard. Navigation happens in the effect below
   // once the session is actually live, which avoids racing it.
   const [landAdmin, setLandAdmin] = useState(false);
+  const adminTargetRef = useRef(false);
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
-      const target = landAdmin && !searchParams.get("returnTo") ? "/admin" : redirect;
+      const target =
+        (landAdmin || adminTargetRef.current) && !searchParams.get("returnTo")
+          ? "/admin"
+          : redirect;
       navigate(target);
     }
   }, [authLoading, isAuthenticated, navigate, redirect, landAdmin, searchParams]);
@@ -115,15 +119,19 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     const formData = new FormData(event.currentTarget);
     try {
+      // Set the navigation intent before auth state can update. Convex Auth may
+      // publish isAuthenticated in the same render as signIn resolves.
+      adminTargetRef.current = true;
+      setLandAdmin(true);
       await signIn("admin-credentials", {
         username: formData.get("username") as string,
         password: formData.get("password") as string,
       });
-      // Admins land on the console unless they were sent here from a page.
-      setLandAdmin(true);
     } catch (signInError) {
       const message =
         signInError instanceof Error ? signInError.message : "";
+      adminTargetRef.current = false;
+      setLandAdmin(false);
       setError(
         message.includes("Введите логин") ? message : "Неверный логин или пароль",
       );
@@ -363,9 +371,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   <p className="text-sm text-muted-foreground text-center mt-4">
                     Не пришёл код?{" "}
                     <Button
+                      type="button"
                       variant="link"
                       className="p-0 h-auto"
-                      onClick={() => setStep("signIn")}
+                      onClick={() => {
+                        setStep("signIn");
+                        setOtp("");
+                        setError(null);
+                      }}
                     >
                       Попробовать снова
                     </Button>

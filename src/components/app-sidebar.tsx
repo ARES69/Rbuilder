@@ -233,6 +233,10 @@ export function AppSidebar({
                             .then(() => {
                               setCopiedId(attachment._id);
                               setTimeout(() => setCopiedId(null), 1200);
+                            })
+                            .catch(() => {
+                              // Clipboard access can be blocked on insecure previews.
+                              setCopiedId(null);
                             });
                         }}
                       >
@@ -250,6 +254,8 @@ export function AppSidebar({
                         onClick={() =>
                           void removeAttachment({
                             attachmentId: attachment._id,
+                          }).catch(() => {
+                            // Keep the list stable and avoid an unhandled rejection.
                           })
                         }
                       >
