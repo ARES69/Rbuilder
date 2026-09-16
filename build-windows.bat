@@ -1,6 +1,13 @@
 @echo off
 setlocal EnableExtensions
 
+rem Use UTF-8 in Windows cmd so Russian messages render correctly.
+chcp 65001 >nul
+
+rem Add standard per-user install locations to PATH.
+if exist "%USERPROFILE%\.bun\bin" set "PATH=%USERPROFILE%\.bun\bin;%PATH%"
+if exist "%USERPROFILE%\.cargo\bin" set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+
 cd /d "%~dp0"
 set "EXIT_CODE=0"
 
@@ -12,16 +19,19 @@ echo.
 
 where bun >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] Bun не найден в PATH.
-  echo Установите Bun: https://bun.sh
+  echo [ERROR] Bun не найден.
+  echo Установите Bun командой:
+  echo powershell -c "irm bun.sh/install.ps1 ^| iex"
+  echo Затем закройте и заново откройте PowerShell.
   set "EXIT_CODE=1"
   goto :fail
 )
 
 where cargo >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] Cargo/Rust не найден в PATH.
+  echo [ERROR] Cargo/Rust не найден.
   echo Установите Rust MSVC: https://rustup.rs
+  echo Затем закройте и заново откройте PowerShell.
   set "EXIT_CODE=1"
   goto :fail
 )

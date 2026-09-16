@@ -1,6 +1,9 @@
 @echo off
 setlocal EnableExtensions
 
+rem Use UTF-8 in Windows cmd so Russian messages render correctly.
+chcp 65001 >nul
+
 cd /d "%~dp0"
 
 echo.
