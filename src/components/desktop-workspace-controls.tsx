@@ -5,6 +5,16 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -26,6 +36,11 @@ export function DesktopWorkspaceControls() {
   const [gitOpen, setGitOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [gitLoading, setGitLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{
+    title: string;
+    description: string;
+    run: () => Promise<void>;
+  } | null>(null);
 
   const refreshGit = async (workspaceRoot: string) => {
     const [status, nextDiff, nextBranches] = await Promise.all([
@@ -92,8 +107,20 @@ export function DesktopWorkspaceControls() {
   };
 
   const checkoutBranch = (branch: string) => {
-    if (!branch || !root) return;
-    void runGitAction(() => runtime.available ? runtime.gitCheckout(root, branch) : Promise.reject(new Error("Desktop bridge недоступен")), `Ветка ${branch} выбрана`);
+    if (!branch || !root || branch === git?.branch) return;
+    const run = () => runGitAction(
+      () => runtime.available ? runtime.gitCheckout(root, branch) : Promise.reject(new Error("Desktop bridge недоступен")),
+      `Ветка ${branch} выбрана`,
+    );
+    if (git?.entries.length) {
+      setPendingAction({
+        title: "Переключить ветку?",
+        description: "В рабочем дереве есть незакоммиченные изменения. Переключение может привести к конфликтам или потере локальных правок.",
+        run,
+      });
+    } else {
+      void run();
+    }
   };
 
   const createBranch = () => {
@@ -195,10 +222,10 @@ export function DesktopWorkspaceControls() {
                 <Button type="button" variant="outline" size="icon-sm" onClick={() => void runGitAction(() => runtime.available && root ? runtime.gitPull(root) : Promise.reject(new Error("Desktop bridge недоступен")), "Изменения получены")} disabled={gitLoading} title="Pull">
                   <Download className="size-3.5" />
                 </Button>
-                <Button type="button" variant="outline" size="icon-sm" onClick={() => void runGitAction(() => runtime.available && root ? runtime.gitPush(root) : Promise.reject(new Error("Desktop bridge недоступен")), "Изменения отправлены")} disabled={gitLoading} title="Push">
+                <Button type="button" variant="outline" size="icon-sm" onClick={() => setPendingAction({ title: "Отправить изменения?", description: "Push отправит локальные commit-ы в удалённый репозиторий. Убедитесь, что remote и ветка настроены правильно.", run: () => runGitAction(() => runtime.available && root ? runtime.gitPush(root) : Promise.reject(new Error("Desktop bridge недоступен")), "Изменения отправлены") })} disabled={gitLoading} title="Push">
                   <Upload className="size-3.5" />
                 </Button>
-                <Button type="button" variant="outline" size="icon-sm" onClick={() => void runGitAction(() => runtime.available && root ? runtime.gitStash(root) : Promise.reject(new Error("Desktop bridge недоступен")), "Изменения убраны в stash")} disabled={gitLoading} title="Stash">
+                <Button type="button" variant="outline" size="icon-sm" onClick={() => setPendingAction({ title: "Убрать изменения в stash?", description: "Локальные изменения будут временно убраны из рабочего дерева. Их можно будет восстановить средствами Git.", run: () => runGitAction(() => runtime.available && root ? runtime.gitStash(root) : Promise.reject(new Error("Desktop bridge недоступен")), "Изменения убраны в stash") })} disabled={gitLoading} title="Stash">
                   <Archive className="size-3.5" />
                 </Button>
               </div>
@@ -248,6 +275,27 @@ export function DesktopWorkspaceControls() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={pendingAction !== null} onOpenChange={(open) => !open && setPendingAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{pendingAction?.title}</AlertDialogTitle>
+            <AlertDialogDescription>{pendingAction?.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const action = pendingAction;
+                setPendingAction(null);
+                if (action) void action.run();
+              }}
+            >
+              Продолжить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
