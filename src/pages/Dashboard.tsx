@@ -269,6 +269,7 @@ export default function Dashboard() {
         html: result.html,
         demo: result.demo,
         trace: result.trace,
+        files: [{ path: "index.html", content: result.html, language: "html" }],
       });
       // A demo/fallback result is not a billable generation. Consume only after
       // a real build has completed, so missing or invalid provider keys do not
@@ -550,8 +551,10 @@ export default function Dashboard() {
       <div className="min-h-0 flex-1">
         {workspaceTab === "preview" ? (
           previewPanel
-        ) : workspaceTab === "code" ? (
-          <CodePanel html={selectedProject?.html} />
+        ) : workspaceTab === "code" ? (            <CodePanel
+              projectId={effectiveProjectId ?? undefined}
+              html={selectedProject?.html}
+            />
         ) : workspaceTab === "data" ? (
           effectiveProjectId ? (
             <DataPanel projectId={effectiveProjectId} />

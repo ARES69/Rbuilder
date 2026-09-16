@@ -14,6 +14,8 @@ import {
   Code2,
   Copy,
   Database,
+  Download,
+  FolderTree,
   KeyRound,
   Loader2,
   Paperclip,
@@ -24,38 +26,88 @@ export { IntegrationsPanel } from "./integrations-panel";
 
 /* ------------------------------ Code panel ------------------------------ */
 
-export function CodePanel({ html }: { html: string | undefined }) {
+export function CodePanel({
+  projectId,
+  html,
+}: {
+  projectId?: Id<"projects">;
+  html: string | undefined;
+}) {
   const [copied, setCopied] = useState(false);
+  const [selectedPath, setSelectedPath] = useState("index.html");
+  const files = useQuery(
+    api.projectFiles.list,
+    projectId ? { projectId } : "skip",
+  );
+  const selectedFile = files?.find((file) => file.path === selectedPath);
+  const content = selectedFile?.content ?? html;
 
-  if (!html) {
+  const downloadProject = () => {
+    const exportFiles = files?.length
+      ? files.map((file) => ({ path: file.path, content: file.content }))
+      : html
+        ? [{ path: "index.html", content: html }]
+        : [];
+    if (!exportFiles.length) return;
+    const blob = new Blob([JSON.stringify({ files: exportFiles }, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "rbuilder-project.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success("Файлы проекта экспортированы");
+  };
+
+  if (!content) {
     return (
       <Empty
         icon={Code2}
-        hint="Сначала создайте что-нибудь — здесь появится сгенерированный исходный код."
+        hint="Сначала создайте приложение — здесь появится файловое дерево и исходный код."
       />
     );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between px-4 py-2">
-        <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          index.html
-        </span>
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground/60">
-            {(html.length / 1024).toFixed(1)} KB
+      <div className="flex items-center justify-between border-b border-border/70 px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <FolderTree className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            {selectedPath}
           </span>
+          <span className="shrink-0 text-[10px] text-muted-foreground/60">
+            {files?.length ?? 1} файл
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
           <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground"
+            onClick={downloadProject}
+            aria-label="Экспортировать проект"
+            title="Экспортировать проект"
+          >
+            <Download className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
             variant="ghost"
             size="sm"
             className="h-7 gap-1.5 text-muted-foreground"
             onClick={() => {
-              void navigator.clipboard.writeText(html).then(() => {
-                setCopied(true);
-                toast.success("Исходный код скопирован");
-                setTimeout(() => setCopied(false), 1500);
-              });
+              void navigator.clipboard
+                .writeText(content)
+                .then(() => {
+                  setCopied(true);
+                  toast.success("Исходный код скопирован");
+                  setTimeout(() => setCopied(false), 1500);
+                })
+                .catch(() => toast.error("Не удалось скопировать код"));
             }}
           >
             {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -63,11 +115,33 @@ export function CodePanel({ html }: { html: string | undefined }) {
           </Button>
         </div>
       </div>
-      <ScrollArea className="min-h-0 flex-1">
-        <pre className="p-4 text-[11px] leading-[1.6] text-muted-foreground">
-          <code>{html}</code>
-        </pre>
-      </ScrollArea>
+      <div className="flex min-h-0 flex-1">
+        <div className="hidden w-36 shrink-0 border-r border-border/70 p-2 sm:block">
+          <p className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+            Файлы
+          </p>
+          {(files?.length ? files : [{ path: "index.html" }]).map((file) => (
+            <button
+              key={file.path}
+              type="button"
+              onClick={() => setSelectedPath(file.path)}
+              className={cn(
+                "flex w-full items-center rounded px-2 py-1.5 text-left text-[11px] transition-colors",
+                file.path === selectedPath
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+              )}
+            >
+              {file.path}
+            </button>
+          ))}
+        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <pre className="p-4 text-[11px] leading-[1.6] text-muted-foreground">
+            <code>{content}</code>
+          </pre>
+        </ScrollArea>
+      </div>
     </div>
   );
 }

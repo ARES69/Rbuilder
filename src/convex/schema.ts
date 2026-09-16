@@ -63,6 +63,19 @@ const schema = defineSchema(
       ),
     }).index("by_project", ["projectId"]),
 
+    // Source files for a project. `html` remains on projects for backwards
+    // compatibility and fast preview loading; this table is the canonical
+    // starting point for the multi-file runtime.
+    projectFiles: defineTable({
+      projectId: v.id("projects"),
+      path: v.string(),
+      content: v.string(),
+      language: v.optional(v.string()),
+      version: v.number(),
+    })
+      .index("by_project", ["projectId"])
+      .index("by_project_path", ["projectId", "path"]),
+
     attachments: defineTable({
       projectId: v.id("projects"),
       name: v.string(),
