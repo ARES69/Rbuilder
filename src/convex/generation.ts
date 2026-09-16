@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { getModel } from "../lib/models";
+import { architectureContract } from "../lib/architecture";
 import { buildResearchQuery, formatResearch } from "../lib/research";
 import {
   defaultEnabledToolIds,
@@ -108,18 +109,20 @@ export const plan = action({
   args: {
     prompt: v.string(),
     modelId: v.optional(v.string()),
+    architectureId: v.optional(v.string()),
   },
-  handler: async (ctx, { prompt, modelId }) => {
+  handler: async (ctx, { prompt, modelId, architectureId }) => {
     const user = await ctx.runQuery(api.users.currentUser);
     if (!user) throw new Error("Not authenticated");
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return { plan: fallbackPlan(prompt), demo: true };
     const model = getModel(modelId);
+    const contract = architectureContract(architectureId);
     const planText = await callModel(
       apiKey,
       model.apiModel,
       PLANNING_PROMPT,
-      `Запрос пользователя:\n${prompt}`,
+      `${contract}\n\nЗапрос пользователя:\n${prompt}`,
       900,
     );
     return { plan: planText.trim() || fallbackPlan(prompt), demo: false };
@@ -195,6 +198,7 @@ export const run = action({
   args: {
     prompt: v.string(),
     modelId: v.optional(v.string()),
+    architectureId: v.optional(v.string()),
     previousHtml: v.optional(v.string()),
     attachmentIds: v.optional(v.array(v.id("attachments"))),
     /** Enabled skill prompt modules (from the Skills tab). */
@@ -204,12 +208,13 @@ export const run = action({
   },
   handler: async (
     ctx,
-    { prompt, modelId, previousHtml, attachmentIds, skillPrompts, toolIds },
+    { prompt, modelId, architectureId, previousHtml, attachmentIds, skillPrompts, toolIds },
   ) => {
     const user = await ctx.runQuery(api.users.currentUser);
     if (!user) throw new Error("Not authenticated");
 
     const model = getModel(modelId);
+    const contract = architectureContract(architectureId);
     const apiKey = process.env.OPENAI_API_KEY;
     const trace: TraceEntry[] = [];
 
@@ -269,6 +274,7 @@ export const run = action({
         attachmentContext.length
           ? `Attached files:\n${attachmentContext.join("\n\n")}`
           : null,
+        contract,
         `Request:\n${prompt}`,
       ]
         .filter(Boolean)
@@ -361,7 +367,7 @@ export const run = action({
     const raw = await callModel(
       apiKey,
       model.apiModel,
-      `${BUILD_PROMPT}${skillsBlock}${toolsBlock}`,
+      `${BUILD_PROMPT}\n\n${contract}${skillsBlock}${toolsBlock}`,
       buildInput,
       16000,
     );
@@ -413,7 +419,7 @@ export const run = action({
       const repaired = await callModel(
         apiKey,
         model.apiModel,
-        `${BUILD_PROMPT}${skillsBlock}${toolsBlock}`,
+        `${BUILD_PROMPT}\n\n${contract}${skillsBlock}${toolsBlock}`,
         fixInput,
         16000,
       );

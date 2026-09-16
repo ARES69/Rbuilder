@@ -6,6 +6,12 @@ import { CAPABILITIES } from "./capabilities";
 import { RU_SERVICES, SERVICE_CATEGORIES, findService } from "./ru-services";
 import { THEMES } from "./theme";
 import {
+  ARCHITECTURES,
+  DEFAULT_ARCHITECTURE_ID,
+  architectureContract,
+  getArchitecture,
+} from "./architecture";
+import {
   KEYLESS_LABEL,
   MAX_RESEARCH_QUERY,
   SEARCH_PROVIDERS,
@@ -159,6 +165,30 @@ describe("themes", () => {
     ]);
     const darkBlue = THEMES.find((t) => t.id === "tomorrow-dark");
     expect(darkBlue!.label).toBe("Tomorrow Dark Blue");
+  });
+});
+
+/* ---------------------------- architectures ----------------------------- */
+
+describe("architecture catalog", () => {
+  test("has unique profiles with complete stack fields", () => {
+    const ids = new Set(ARCHITECTURES.map((profile) => profile.id));
+    expect(ids.size).toBe(ARCHITECTURES.length);
+    for (const profile of ARCHITECTURES) {
+      expect(profile.name.length).toBeGreaterThan(0);
+      expect(profile.frontend.length).toBeGreaterThan(0);
+      expect(profile.backend.length).toBeGreaterThan(0);
+      expect(profile.database.length).toBeGreaterThan(0);
+      expect(profile.auth.length).toBeGreaterThan(0);
+      expect(profile.constraints.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("falls back safely and produces an architecture contract", () => {
+    expect(getArchitecture("unknown").id).toBe(DEFAULT_ARCHITECTURE_ID);
+    const contract = architectureContract("crm-russia");
+    expect(contract).toContain("ARCHITECTURE: Российская CRM");
+    expect(contract).toContain("Convex actions + webhooks");
   });
 });
 

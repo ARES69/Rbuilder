@@ -9,6 +9,7 @@ import {
 } from "@/components/app-sidebar";
 import { ModelPicker, useSessionStatus } from "@/components/model-picker";
 import { getModel, DAILY_SESSION_LIMIT } from "@/lib/models";
+import { ARCHITECTURES, DEFAULT_ARCHITECTURE_ID } from "@/lib/architecture";
 import { WorkspaceTabs, type WorkspaceTab } from "@/components/workspace-tabs";
 import {
   CodePanel,
@@ -57,6 +58,7 @@ import {
   ChevronDown,
   ClipboardList,
   ExternalLink,
+  Layers3,
   FileText,
   Loader2,
   LogOut,
@@ -103,6 +105,8 @@ export default function Dashboard() {
   const [input, setInput] = useState("");
   const [approvedPlan, setApprovedPlan] = useState<string | null>(null);
   const [planDraft, setPlanDraft] = useState<string | null>(null);
+  const [architectureId, setArchitectureId] = useState(DEFAULT_ARCHITECTURE_ID);
+  const [architectureOpen, setArchitectureOpen] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -201,6 +205,7 @@ export default function Dashboard() {
       const result = await convex.action(api.generation.plan, {
         prompt: content,
         modelId: selectedProject?.model ?? pendingModel,
+        architectureId,
       });
       setPlanDraft(result.plan);
     } catch (error) {
@@ -287,6 +292,7 @@ export default function Dashboard() {
       const result = await convex.action(api.generation.run, {
         prompt: request,
         modelId: model.id,
+        architectureId,
         previousHtml: previous?.html ?? undefined,
         attachmentIds: attachmentIds.length ? attachmentIds : undefined,
         skillPrompts:
@@ -498,6 +504,18 @@ export default function Dashboard() {
               variant="ghost"
               size="sm"
               className="h-8 gap-1.5 text-muted-foreground"
+              onClick={() => setArchitectureOpen(true)}
+              disabled={generating || planning}
+              title="Выбрать архитектуру проекта"
+            >
+              <Layers3 className="size-3.5" />
+              Архитектура
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-muted-foreground"
               onClick={() => void handleCreatePlan()}
               disabled={generating || planning || !input.trim()}
               title="Сначала составить план проекта"
@@ -539,6 +557,55 @@ export default function Dashboard() {
           </Button>
         </div>
       </div>
+
+      <Dialog open={architectureOpen} onOpenChange={setArchitectureOpen}>
+        <DialogContent className="max-h-[80vh] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Layers3 className="size-4" />
+              Архитектура проекта
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Архитектура станет контрактом для планировщика и builder-агента.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid max-h-[52vh] gap-2 overflow-y-auto sm:grid-cols-2">
+            {ARCHITECTURES.map((profile) => {
+              const active = architectureId === profile.id;
+              return (
+                <button
+                  key={profile.id}
+                  type="button"
+                  onClick={() => {
+                    setArchitectureId(profile.id);
+                    setArchitectureOpen(false);
+                  }}
+                  className={cn(
+                    "rounded-md border p-3 text-left transition-colors",
+                    active
+                      ? "border-foreground bg-accent/50"
+                      : "border-border/70 hover:border-foreground/40 hover:bg-accent/30",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium">{profile.name}</span>
+                    {active ? <Badge variant="outline" className="text-[10px]">Выбрано</Badge> : null}
+                  </div>
+                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{profile.description}</p>
+                  <div className="mt-2 space-y-0.5 text-[10px] text-muted-foreground">
+                    <p><span className="font-medium text-foreground/80">Frontend:</span> {profile.frontend}</p>
+                    <p><span className="font-medium text-foreground/80">Backend:</span> {profile.backend}</p>
+                    <p><span className="font-medium text-foreground/80">Данные:</span> {profile.database}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button type="button" size="sm" onClick={() => setArchitectureOpen(false)}>Готово</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={planDraft !== null} onOpenChange={(open) => !open && setPlanDraft(null)}>
         <DialogContent className="max-h-[80vh] sm:max-w-xl">
