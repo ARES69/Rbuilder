@@ -68,6 +68,8 @@ import {
   LogOut,
   Monitor,
   PanelLeft,
+  Rocket,
+
   Puzzle,
   SlidersHorizontal,
   Paperclip,
@@ -398,7 +400,21 @@ export default function Dashboard() {
   };
 
   const chatPanel = (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col bg-[#071728]">
+      <div className="flex shrink-0 items-start gap-3 border-b border-border/60 px-4 py-3">
+        <span className="flex size-8 items-center justify-center rounded-xl bg-blue-600/20 text-blue-300 ring-1 ring-blue-400/20">
+          <Sparkles className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">AI Agent</span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
+              <span className="size-1.5 rounded-full bg-emerald-400" /> {activeModel.name}
+            </span>
+          </div>
+          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">Пишет код, создаёт файлы, запускает сборку и разворачивает приложение</p>
+        </div>
+      </div>
       {/* Chat messages */}
       <ScrollArea className="flex-1 min-h-0">
         <div className="flex flex-col gap-4 p-4">
@@ -886,7 +902,7 @@ export default function Dashboard() {
   }
 
   return (
-    <main className="flex h-screen flex-col bg-background">
+    <main className="rbuilder-ide flex h-screen flex-col bg-background">
       {/* Top bar */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border/70 px-3">
         <div className="flex items-center gap-2">
@@ -901,9 +917,13 @@ export default function Dashboard() {
               <PanelLeft className={cn("size-4", !sidebarCollapsed && "text-foreground")} />
             </Button>
           )}
-          <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Sparkles className="size-3.5" />
-          </span>
+          <div className="rbuilder-wordmark flex items-center gap-2 border-r border-border/60 pr-3">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-blue-500 text-white shadow-[0_0_18px_rgba(37,99,235,0.35)]">
+              <Sparkles className="size-3.5" />
+            </span>
+            <span className="hidden text-sm font-semibold tracking-tight sm:inline">rbuilder</span>
+          </div>
+          <span className="hidden text-xs text-muted-foreground/70 xl:inline">Создавай приложения, сайты и всё, что можешь представить — с ИИ агентом</span>
 
           {/* Workspace switcher */}
           <DropdownMenu>
@@ -1017,6 +1037,16 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            className="hidden h-8 gap-1.5 bg-blue-600 px-3 text-xs text-white shadow-[0_0_18px_rgba(37,99,235,0.25)] hover:bg-blue-500 sm:inline-flex"
+            onClick={openPreviewInTab}
+            disabled={!selectedProject?.html}
+          >
+            <Rocket className="size-3.5" /> Deploy
+          </Button>
           <DesktopWorkspaceControls />
           <DesktopStatus />
           {user?.role === "admin" ? (
