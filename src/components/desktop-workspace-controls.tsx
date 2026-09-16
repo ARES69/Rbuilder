@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, Download, FolderOpen, GitBranch, GitCommitHorizontal, Loader2, RefreshCw, Upload } from "lucide-react";
+import { Archive, Download, FolderOpen, GitBranch, GitCommitHorizontal, Loader2, RefreshCw, Terminal, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -36,6 +36,10 @@ export function DesktopWorkspaceControls() {
   const [gitOpen, setGitOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [gitLoading, setGitLoading] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalCommand, setTerminalCommand] = useState("bun test");
+  const [terminalOutput, setTerminalOutput] = useState("");
+  const [terminalRunning, setTerminalRunning] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
     title: string;
     description: string;
@@ -130,6 +134,43 @@ export function DesktopWorkspaceControls() {
     setNewBranch("");
   };
 
+  const executeTerminal = async () => {
+    const commandLine = terminalCommand.trim();
+    if (!runtime.available || !root || !commandLine) {
+      if (!runtime.available) toast.info("Терминал доступен в RBuilder Desktop.");
+      return;
+    }
+    const [command, ...args] = commandLine.split(/\\s+/);
+    setTerminalRunning(true);
+    try {
+      const result = await runtime.runCommand(root, command, args);
+      setTerminalOutput(`$ ${commandLine}\\n\\n${result.stdout}${result.stderr ? `\\n${result.stderr}` : ""}\\n[exit ${result.code}]`);
+      if (result.code === 0) toast.success("Команда завершена");
+      else toast.error(`Команда завершилась с кодом ${result.code}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Не удалось запустить команду";
+      setTerminalOutput(`$ ${commandLine}\\n\\n${message}`);
+      toast.error(message);
+    } finally {
+      setTerminalRunning(false);
+    }
+  };
+
+  const runTerminal = () => {
+    const command = terminalCommand.trim();
+    if (!command) return;
+    const safe = /^(pwd|ls|find|git\\s+(status|diff|log|branch)|bun\\s+(test|x\\s+tsc\\s+-b\\s+--noEmit)|npm\\s+test|pnpm\\s+test)(\\s|$)/.test(command);
+    if (safe) {
+      void executeTerminal();
+      return;
+    }
+    setPendingAction({
+      title: "Запустить команду?",
+      description: `Команда «${command}» не входит в безопасный список. Она может изменить файлы, установить зависимости или удалить данные.`,
+      run: executeTerminal,
+    });
+  };
+
   const commit = async () => {
     const message = commitMessage.trim();
     if (!runtime.available || !root || !message) return;
@@ -175,6 +216,22 @@ export function DesktopWorkspaceControls() {
         >
           {gitLoading ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
           Git
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="hidden h-8 gap-1.5 px-2 text-xs text-muted-foreground lg:inline-flex"
+          onClick={() => {
+            if (!runtime.available || !root) {
+              toast.info("Терминал доступен после подключения RBuilder Desktop.");
+            } else {
+              setTerminalOpen(true);
+            }
+          }}
+          title="Открыть терминал"
+        >
+          <Terminal className="size-3.5" /> Терминал
         </Button>
         {git && (
           <Badge variant="outline" className="hidden h-6 max-w-36 gap-1 truncate px-2 text-[10px] text-muted-foreground xl:inline-flex" title={`${git.entries.length} изменений`}>
@@ -273,6 +330,35 @@ export function DesktopWorkspaceControls() {
               Создать commit
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={terminalOpen} onOpenChange={setTerminalOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base"><Terminal className="size-4" /> Локальный терминал</DialogTitle>
+            <DialogDescription className="truncate text-xs">Рабочая папка: {root ?? "не подключена"}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="desktop-terminal-command" className="text-xs font-medium">Команда</label>
+            <div className="flex gap-2">
+              <Input
+                id="desktop-terminal-command"
+                value={terminalCommand}
+                onChange={(event) => setTerminalCommand(event.target.value)}
+                onKeyDown={(event) => { if (event.key === "Enter") void runTerminal(); }}
+                placeholder="bun test"
+                className="font-mono text-xs"
+                disabled={terminalRunning}
+              />
+              <Button type="button" size="sm" onClick={runTerminal} disabled={terminalRunning || !terminalCommand.trim()}>
+                {terminalRunning ? <Loader2 className="size-3.5 animate-spin" /> : "Запустить"}
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">Без подтверждения запускаются только команды чтения и проверок. Остальные потребуют подтверждение.</p>
+          </div>
+          <pre className="max-h-64 min-h-24 overflow-auto rounded-md border border-border/70 bg-muted/30 p-3 text-[10px] leading-4 text-foreground/80">{terminalOutput || "Вывод команды появится здесь."}</pre>
+          <DialogFooter><Button type="button" variant="ghost" size="sm" onClick={() => setTerminalOpen(false)}>Закрыть</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
