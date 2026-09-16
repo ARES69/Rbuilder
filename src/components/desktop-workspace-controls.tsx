@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, Download, FileCode2, FolderOpen, GitBranch, GitCommitHorizontal, Loader2, Plus, RefreshCw, Save, Search, Terminal, Trash2, Upload } from "lucide-react";
+import { Archive, Download, ExternalLink, FileCode2, FolderOpen, GitBranch, GitCommitHorizontal, Loader2, Plus, RefreshCw, Save, Search, Terminal, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -40,6 +40,8 @@ export function DesktopWorkspaceControls() {
   const [terminalCommand, setTerminalCommand] = useState("bun test");
   const [terminalOutput, setTerminalOutput] = useState("");
   const [terminalRunning, setTerminalRunning] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [files, setFiles] = useState<DesktopFileEntry[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -243,6 +245,24 @@ export function DesktopWorkspaceControls() {
     }
   };
 
+  const startLocalPreview = async () => {
+    if (!runtime.available || !root) {
+      toast.info("Локальный preview доступен после подключения RBuilder Desktop.");
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const result = await runtime.startPreview(root);
+      setPreviewUrl(result.url);
+      window.open(result.url, "_blank", "noopener,noreferrer");
+      toast.success("Локальный preview запущен");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось запустить preview");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const executeTerminal = async () => {
     const commandLine = terminalCommand.trim();
     if (!runtime.available || !root || !commandLine) {
@@ -331,6 +351,18 @@ export function DesktopWorkspaceControls() {
           variant="ghost"
           size="sm"
           className="hidden h-8 gap-1.5 px-2 text-xs text-muted-foreground lg:inline-flex"
+          onClick={() => void startLocalPreview()}
+          disabled={previewLoading}
+          title="Запустить локальный preview"
+        >
+          {previewLoading ? <Loader2 className="size-3.5 animate-spin" /> : <ExternalLink className="size-3.5" />}
+          Preview
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="hidden h-8 gap-1.5 px-2 text-xs text-muted-foreground lg:inline-flex"
           onClick={() => void openFiles()}
           disabled={fileLoading}
           title="Открыть локальные файлы"
@@ -354,6 +386,11 @@ export function DesktopWorkspaceControls() {
         >
           <Terminal className="size-3.5" /> Терминал
         </Button>
+        {previewUrl && (
+          <Badge variant="outline" className="hidden h-6 max-w-32 items-center gap-1 px-2 text-[10px] text-emerald-600 xl:inline-flex" title={previewUrl}>
+            <span className="size-1.5 rounded-full bg-emerald-500" /> local
+          </Badge>
+        )}
         {git && (
           <Badge variant="outline" className="hidden h-6 max-w-36 gap-1 truncate px-2 text-[10px] text-muted-foreground xl:inline-flex" title={`${git.entries.length} изменений`}>
             <GitBranch className="size-3 shrink-0" />
