@@ -38,6 +38,47 @@ const schema = defineSchema(
       role: v.optional(roleValidator), // role of the user. do not remove
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
+    workspaces: defineTable({
+      userId: v.id("users"),
+      name: v.string(),
+      localPath: v.optional(v.string()),
+      architectureId: v.optional(v.string()),
+      rules: v.optional(v.string()),
+    }).index("by_user", ["userId"]),
+
+    agentRuns: defineTable({
+      userId: v.id("users"),
+      workspaceId: v.id("workspaces"),
+      projectId: v.optional(v.id("projects")),
+      prompt: v.string(),
+      status: v.union(
+        v.literal("running"),
+        v.literal("completed"),
+        v.literal("failed"),
+        v.literal("cancelled"),
+      ),
+      mode: v.union(
+        v.literal("ask"),
+        v.literal("plan"),
+        v.literal("edit"),
+        v.literal("debug"),
+        v.literal("review"),
+        v.literal("run"),
+      ),
+      trace: v.optional(
+        v.array(
+          v.object({
+            agent: v.string(),
+            note: v.optional(v.string()),
+            ms: v.number(),
+          }),
+        ),
+      ),
+      error: v.optional(v.string()),
+    })
+      .index("by_user", ["userId"])
+      .index("by_workspace", ["workspaceId"]),
+
     projects: defineTable({
       userId: v.id("users"),
       name: v.string(),

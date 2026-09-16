@@ -103,6 +103,9 @@ export default function Dashboard() {
   const isMobile = useIsMobile();
 
   const projects = useQuery(api.projects.list, {});
+  const workspaces = useQuery(api.workspaces.list, {});
+  const [selectedWorkspaceId, setSelectedWorkspaceId] =
+    useState<Id<"workspaces"> | null>(null);
   const [selectedProjectId, setSelectedProjectId] =
     useState<Id<"projects"> | null>(null);
 
@@ -130,6 +133,8 @@ export default function Dashboard() {
 
   // Effective selection: the explicit pick when set, otherwise the most
   // recent project. Derived during render — no state-sync effect needed.
+  const effectiveWorkspaceId =
+    selectedWorkspaceId ?? (workspaces?.length ? workspaces[0]._id : null);
   const effectiveProjectId =
     selectedProjectId ?? (projects?.length ? projects[0]._id : null);
 
@@ -143,6 +148,10 @@ export default function Dashboard() {
   );
   const enabledSkillPrompts = useQuery(api.skills.enabledPrompts, {});
   const toolState = useQuery(api.tools.list, {});
+  const agentRuns = useQuery(
+    api.workspaces.runs,
+    effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : "skip",
+  );
 
   // Keep chat scrolled to the latest message.
   useEffect(() => {
@@ -156,6 +165,10 @@ export default function Dashboard() {
 
   const sendMessage = useMutation(api.messages.send);
   const commitBuild = useMutation(api.builds.commit);
+  const ensureWorkspace = useMutation(api.workspaces.ensureDefault);
+  const createWorkspace = useMutation(api.workspaces.create);
+  const startAgentRun = useMutation(api.workspaces.startRun);
+  const finishAgentRun = useMutation(api.workspaces.finishRun);
   const setModelMutation = useMutation(api.projects.setModel);
 
   const activeModel = getModel(selectedProject?.model ?? pendingModel);
@@ -248,6 +261,7 @@ export default function Dashboard() {
     setGenerating(true);
     setMobileTab("preview");
 
+    let runId: Id<"agentRuns"> | null = null;
     try {
       let projectId = effectiveProjectId;
       if (!projectId) {
@@ -258,6 +272,15 @@ export default function Dashboard() {
         });
         setSelectedProjectId(projectId);
       }
+
+      const workspaceId = effectiveWorkspaceId ?? (await ensureWorkspace({}));
+      setSelectedWorkspaceId(workspaceId);
+      runId = await startAgentRun({
+        workspaceId,
+        projectId,
+        prompt: request,
+        mode: "edit",
+      });
 
       // Upload staged files to Convex storage, then link them to the project.
       const attachmentIds: Id<"attachments">[] = [];
@@ -328,10 +351,20 @@ export default function Dashboard() {
       if (model.costsSession && !result.demo) {
         await convex.mutation(api.sessions.consume, { day: todayKey });
       }
+      if (runId) {
+        await finishAgentRun({ runId, status: "completed", trace: result.trace });
+      }
       setApprovedPlan(null);
       setPreviewKey((k) => k + 1);
       toast.success(result.demo ? "Демо-режим: добавьте ключ модели" : "Сборка завершена");
     } catch (error) {
+      if (runId) {
+        await finishAgentRun({
+          runId,
+          status: "failed",
+          error: error instanceof Error ? error.message : "Сборка не удалась",
+        }).catch(() => undefined);
+      }
       toast.error(
         error instanceof Error
           ? error.message
@@ -870,6 +903,39 @@ export default function Dashboard() {
             <Sparkles className="size-3.5" />
           </span>
 
+          {/* Workspace switcher */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 max-w-48 gap-1.5 text-xs">
+                <Layers3 className="size-3.5 text-muted-foreground" />
+                <span className="truncate">{workspaces?.find((w) => w._id === effectiveWorkspaceId)?.name ?? "Workspace"}</span>
+                <ChevronDown className="size-3 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-60">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">Workspaces</DropdownMenuLabel>
+              {workspaces?.length ? workspaces.map((workspace) => (
+                <DropdownMenuItem
+                  key={workspace._id}
+                  className="cursor-pointer"
+                  onClick={() => setSelectedWorkspaceId(workspace._id)}
+                >
+                  <Layers3 className="size-3.5" />
+                  <span className="truncate">{workspace.name}</span>
+                </DropdownMenuItem>
+              )) : (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">Создастся при первом запуске агента</div>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => void createWorkspace({ name: `Workspace ${(workspaces?.length ?? 0) + 1}`, architectureId }).then(setSelectedWorkspaceId).catch(() => toast.error("Не удалось создать workspace"))}
+              >
+                <Plus className="size-3.5" /> Новый workspace
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {/* Project switcher */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -940,6 +1006,12 @@ export default function Dashboard() {
               {session.used}/{session.limit} сессий сегодня
             </span>
           )}
+          {agentRuns?.[0] ? (
+            <span className="hidden items-center gap-1 text-[10px] text-muted-foreground/70 lg:flex" title="Последний запуск агента">
+              <span className={cn("size-1.5 rounded-full", agentRuns[0].status === "completed" ? "bg-emerald-500" : agentRuns[0].status === "failed" ? "bg-destructive" : "bg-amber-500")} />
+              run #{agentRuns[0]._id.slice(-4)}
+            </span>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-1">
