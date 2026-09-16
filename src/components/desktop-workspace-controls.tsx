@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { getDesktopRuntime, type DesktopFileEntry, type DesktopRuntime, type GitStatus } from "@/lib/desktop-bridge";
+import { getDesktopRuntime, type DesktopFileEntry, type DesktopProcess, type DesktopRuntime, type GitStatus } from "@/lib/desktop-bridge";
 
 export function DesktopWorkspaceControls() {
   const [runtime] = useState<DesktopRuntime>(() => getDesktopRuntime());
@@ -42,6 +42,9 @@ export function DesktopWorkspaceControls() {
   const [terminalRunning, setTerminalRunning] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [processesOpen, setProcessesOpen] = useState(false);
+  const [processes, setProcesses] = useState<DesktopProcess[]>([]);
+  const [processesLoading, setProcessesLoading] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [files, setFiles] = useState<DesktopFileEntry[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -245,6 +248,41 @@ export function DesktopWorkspaceControls() {
     }
   };
 
+  const refreshProcesses = async () => {
+    if (!runtime.available) return;
+    setProcessesLoading(true);
+    try {
+      setProcesses(await runtime.listProcesses());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось получить список процессов");
+    } finally {
+      setProcessesLoading(false);
+    }
+  };
+
+  const openProcesses = async () => {
+    if (!runtime.available) {
+      toast.info("Управление процессами доступно в RBuilder Desktop.");
+      return;
+    }
+    await refreshProcesses();
+    setProcessesOpen(true);
+  };
+
+  const stopProcess = async (pid: number) => {
+    if (!runtime.available) return;
+    setProcessesLoading(true);
+    try {
+      await runtime.stopProcess(pid);
+      await refreshProcesses();
+      toast.success("Процесс остановлен");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось остановить процесс");
+    } finally {
+      setProcessesLoading(false);
+    }
+  };
+
   const startLocalPreview = async () => {
     if (!runtime.available || !root) {
       toast.info("Локальный preview доступен после подключения RBuilder Desktop.");
@@ -345,6 +383,18 @@ export function DesktopWorkspaceControls() {
         >
           {gitLoading ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
           Git
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="hidden h-8 gap-1.5 px-2 text-xs text-muted-foreground lg:inline-flex"
+          onClick={() => void openProcesses()}
+          disabled={processesLoading}
+          title="Управление локальными процессами"
+        >
+          <span className="relative flex size-3.5 items-center justify-center"><span className="size-2 rounded-full bg-emerald-500" /></span>
+          Процессы
         </Button>
         <Button
           type="button"
@@ -488,6 +538,24 @@ export function DesktopWorkspaceControls() {
               Создать commit
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={processesOpen} onOpenChange={setProcessesOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base">Локальные процессы</DialogTitle>
+            <DialogDescription className="text-xs">Preview и другие процессы, запущенные Desktop runtime.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {processes.length ? processes.map((process) => (
+              <div key={process.pid} className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2">
+                <div className="min-w-0 text-xs"><p className="font-medium">{process.kind} · PID {process.pid}</p><p className="truncate text-muted-foreground">{process.command}</p></div>
+                <Button type="button" variant="destructive" size="sm" onClick={() => void stopProcess(process.pid)} disabled={processesLoading}>Остановить</Button>
+              </div>
+            )) : <p className="py-6 text-center text-xs text-muted-foreground">Запущенных процессов нет</p>}
+          </div>
+          <DialogFooter><Button type="button" variant="ghost" size="sm" onClick={() => void refreshProcesses()} disabled={processesLoading}>Обновить</Button><Button type="button" size="sm" onClick={() => setProcessesOpen(false)}>Закрыть</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

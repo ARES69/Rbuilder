@@ -246,6 +246,8 @@ describe("desktop bridge", () => {
       "git_stash",
       "terminal_run",
       "preview_start",
+      "process_list",
+      "process_stop",
     ]);
   });
 });

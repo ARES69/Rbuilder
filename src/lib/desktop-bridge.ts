@@ -26,6 +26,14 @@ export interface CommandResult {
   stderr: string;
 }
 
+export interface DesktopProcess {
+  pid: number;
+  kind: "preview" | "command";
+  command: string;
+  root: string;
+  running: boolean;
+}
+
 export interface DesktopBridge {
   readonly available: true;
   readonly capabilities: readonly DesktopCapability[];
@@ -45,6 +53,8 @@ export interface DesktopBridge {
   gitStash(root: string): Promise<CommandResult>;
   runCommand(root: string, command: string, args?: string[]): Promise<CommandResult>;
   startPreview(root: string, command?: string): Promise<{ url: string; pid?: number }>;
+  listProcesses(): Promise<DesktopProcess[]>;
+  stopProcess(pid: number): Promise<void>;
 }
 
 export interface DesktopBridgeUnavailable {
@@ -73,6 +83,8 @@ export const DESKTOP_COMMANDS = {
   gitStash: "git_stash",
   runCommand: "terminal_run",
   startPreview: "preview_start",
+  listProcesses: "process_list",
+  stopProcess: "process_stop",
 } as const;
 
 type TauriLikeInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -107,6 +119,8 @@ function createDesktopBridge(invoke: TauriLikeInvoke): DesktopBridge {
       call<CommandResult>(DESKTOP_COMMANDS.runCommand, { root, command, args }),
     startPreview: (root, command = "bun run dev") =>
       call<{ url: string; pid?: number }>(DESKTOP_COMMANDS.startPreview, { root, command }),
+    listProcesses: () => call<DesktopProcess[]>(DESKTOP_COMMANDS.listProcesses),
+    stopProcess: (pid) => call<void>(DESKTOP_COMMANDS.stopProcess, { pid }),
   };
 }
 

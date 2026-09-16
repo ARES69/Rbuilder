@@ -1,6 +1,11 @@
 use serde::Serialize;
-use std::{fs, path::{Path, PathBuf}, process::Command};
+use std::{collections::HashMap, fs, path::{Path, PathBuf}, process::{Child, Command}, sync::Mutex};
+use tauri::{State};
 use tauri_plugin_dialog::DialogExt;
+
+pub struct AppState {
+    processes: Mutex<HashMap<u32, Child>>,
+}
 
 const MAX_FILE_BYTES: u64 = 2_000_000;
 
@@ -33,6 +38,16 @@ pub struct CommandResult {
     pub code: i32,
     pub stdout: String,
     pub stderr: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub kind: String,
+    pub command: String,
+    pub root: String,
+    pub running: bool,
 }
 
 fn reject_protected(path: &Path) -> Result<(), String> {
@@ -168,22 +183,48 @@ pub fn terminal_run(root: String, command: String, args: Vec<String>) -> Result<
 }
 
 #[tauri::command]
-pub fn preview_start(root: String, command: Option<String>) -> Result<serde_json::Value, String> {
+pub fn preview_start(state: State<'_, AppState>, root: String, command: Option<String>) -> Result<serde_json::Value, String> {
     let root = fs::canonicalize(root).map_err(|e| e.to_string())?;
     let line = command.unwrap_or_else(|| "bun run dev".into());
     let mut parts = line.split_whitespace();
     let executable = parts.next().ok_or("Команда preview пуста")?;
-    let child = Command::new(executable).args(parts).current_dir(root).spawn().map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "url": "http://localhost:5173", "pid": child.id() }))
+    let child = Command::new(executable).args(parts).current_dir(&root).spawn().map_err(|e| e.to_string())?;
+    let pid = child.id();
+    state.processes.lock().map_err(|_| "Process manager недоступен")?.insert(pid, child);
+    Ok(serde_json::json!({ "url": "http://localhost:5173", "pid": pid }))
+}
+
+#[tauri::command]
+pub fn process_list(state: State<'_, AppState>) -> Result<Vec<ProcessInfo>, String> {
+    let mut processes = state.processes.lock().map_err(|_| "Process manager недоступен")?;
+    let mut result = Vec::new();
+    let mut finished = Vec::new();
+    for (pid, child) in processes.iter_mut() {
+        let running = child.try_wait().map_err(|e| e.to_string())?.is_none();
+        if !running { finished.push(*pid); }
+        result.push(ProcessInfo { pid: *pid, kind: "preview".into(), command: "preview".into(), root: String::new(), running });
+    }
+    for pid in finished { processes.remove(&pid); }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn process_stop(state: State<'_, AppState>, pid: u32) -> Result<(), String> {
+    let mut processes = state.processes.lock().map_err(|_| "Process manager недоступен")?;
+    let mut child = processes.remove(&pid).ok_or("Процесс не найден")?;
+    child.kill().map_err(|e| e.to_string())?;
+    let _ = child.wait();
+    Ok(())
 }
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(AppState { processes: Mutex::new(HashMap::new()) })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             workspace_pick, workspace_list_files, workspace_read_file, workspace_write_file, workspace_delete_file,
             git_status, git_diff, git_commit, git_branches, git_checkout, git_create_branch, git_pull, git_push, git_stash,
-            terminal_run, preview_start
+            terminal_run, preview_start, process_list, process_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running RBuilder Desktop");
