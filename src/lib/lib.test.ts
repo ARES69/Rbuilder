@@ -21,6 +21,8 @@ import {
   pickProvider,
   stripHtml,
 } from "./research";
+import { SNIPPETS, SNIPPET_CATEGORIES } from "./snippets";
+import { PROMPT_PRESETS } from "./prompt-presets";
 import {
   TOOLS,
   TOOL_GROUPS,
@@ -189,6 +191,29 @@ describe("architecture catalog", () => {
     const contract = architectureContract("crm-russia");
     expect(contract).toContain("ARCHITECTURE: Российская CRM");
     expect(contract).toContain("Convex actions + webhooks");
+  });
+});
+
+/* ---------------------------- snippets/presets --------------------------- */
+
+describe("snippets and prompt presets", () => {
+  test("snippets have unique ids and usable prompts", () => {
+    const ids = new Set(SNIPPETS.map((snippet) => snippet.id));
+    expect(ids.size).toBe(SNIPPETS.length);
+    const categories = new Set(SNIPPET_CATEGORIES.map((category) => category.id));
+    for (const snippet of SNIPPETS) {
+      expect(categories.has(snippet.category)).toBe(true);
+      expect(snippet.prompt.length).toBeGreaterThan(30);
+      expect(snippet.files.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("presets have unique ids and non-empty requirements", () => {
+    const ids = new Set(PROMPT_PRESETS.map((preset) => preset.id));
+    expect(ids.size).toBe(PROMPT_PRESETS.length);
+    for (const preset of PROMPT_PRESETS) {
+      expect(preset.prompt.length).toBeGreaterThan(40);
+    }
   });
 });
 

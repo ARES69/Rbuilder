@@ -10,6 +10,8 @@ import {
 import { ModelPicker, useSessionStatus } from "@/components/model-picker";
 import { getModel, DAILY_SESSION_LIMIT } from "@/lib/models";
 import { ARCHITECTURES, DEFAULT_ARCHITECTURE_ID } from "@/lib/architecture";
+import { SNIPPETS, SNIPPET_CATEGORIES } from "@/lib/snippets";
+import { PROMPT_PRESETS } from "@/lib/prompt-presets";
 import { WorkspaceTabs, type WorkspaceTab } from "@/components/workspace-tabs";
 import {
   CodePanel,
@@ -64,6 +66,8 @@ import {
   LogOut,
   Monitor,
   PanelLeft,
+  Puzzle,
+  SlidersHorizontal,
   Paperclip,
   Plus,
   RefreshCw,
@@ -107,6 +111,8 @@ export default function Dashboard() {
   const [planDraft, setPlanDraft] = useState<string | null>(null);
   const [architectureId, setArchitectureId] = useState(DEFAULT_ARCHITECTURE_ID);
   const [architectureOpen, setArchitectureOpen] = useState(false);
+  const [snippetsOpen, setSnippetsOpen] = useState(false);
+  const [presetsOpen, setPresetsOpen] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -195,6 +201,11 @@ export default function Dashboard() {
     } catch {
       toast.error("Could not delete the project.");
     }
+  };
+
+  const appendPrompt = (addition: string) => {
+    setInput((current) => (current.trim() ? `${current.trim()}\n\n${addition}` : addition));
+    setMobileTab("chat");
   };
 
   const handleCreatePlan = async () => {
@@ -528,6 +539,28 @@ export default function Dashboard() {
               variant="ghost"
               size="sm"
               className="h-8 gap-1.5 text-muted-foreground"
+              onClick={() => setSnippetsOpen(true)}
+              disabled={generating}
+            >
+              <Puzzle className="size-3.5" />
+              Снипеты
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-muted-foreground"
+              onClick={() => setPresetsOpen(true)}
+              disabled={generating}
+            >
+              <SlidersHorizontal className="size-3.5" />
+              Пресеты
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-muted-foreground"
               onClick={() => fileInputRef.current?.click()}
               disabled={generating}
             >
@@ -604,6 +637,74 @@ export default function Dashboard() {
           <DialogFooter>
             <Button type="button" size="sm" onClick={() => setArchitectureOpen(false)}>Готово</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={snippetsOpen} onOpenChange={setSnippetsOpen}>
+        <DialogContent className="max-h-[80vh] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Puzzle className="size-4" />
+              Библиотека снипетов
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Выберите готовый сценарий — его требования добавятся в текущий prompt.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[55vh] space-y-2 overflow-y-auto">
+            {SNIPPETS.map((snippet) => (
+              <button
+                key={snippet.id}
+                type="button"
+                onClick={() => {
+                  appendPrompt(snippet.prompt);
+                  setSnippetsOpen(false);
+                  toast.success(`Снипет «${snippet.name}» добавлен`);
+                }}
+                className="w-full rounded-md border border-border/70 p-3 text-left transition-colors hover:border-foreground/40 hover:bg-accent/40"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{snippet.name}</span>
+                  <Badge variant="outline" className="text-[10px]">
+                    {SNIPPET_CATEGORIES.find((category) => category.id === snippet.category)?.label}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs leading-4 text-muted-foreground">{snippet.description}</p>
+                <p className="mt-2 text-[10px] text-muted-foreground/70">{snippet.files.join(" · ")}</p>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={presetsOpen} onOpenChange={setPresetsOpen}>
+        <DialogContent className="max-h-[80vh] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <SlidersHorizontal className="size-4" />
+              Prompt presets
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Пресет добавляет профессиональные требования к текущему запросу.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {PROMPT_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => {
+                  appendPrompt(preset.prompt);
+                  setPresetsOpen(false);
+                  toast.success(`Пресет «${preset.name}» добавлен`);
+                }}
+                className="w-full rounded-md border border-border/70 p-3 text-left transition-colors hover:border-foreground/40 hover:bg-accent/40"
+              >
+                <span className="text-sm font-medium">{preset.name}</span>
+                <p className="mt-1 text-xs leading-4 text-muted-foreground">{preset.description}</p>
+              </button>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
 
