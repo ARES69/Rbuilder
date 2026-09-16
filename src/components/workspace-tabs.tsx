@@ -70,9 +70,10 @@ export function WorkspaceTabs({
         {status && !status.aiKey ? (
           <Badge
             variant="outline"
-            className="h-5 rounded-full px-1.5 text-[10px] font-normal text-amber-600"
+            className="h-5 rounded-full border-blue-400/20 px-1.5 text-[10px] font-normal text-blue-300"
+            title="Добавьте ключ модели во вкладке API-ключи для генерации через провайдера"
           >
-            демо-режим
+            локальный режим
           </Badge>
         ) : null}
       </div>
