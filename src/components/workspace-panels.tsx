@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { KEYLESS_LABEL } from "@/lib/research";
 import { toast } from "sonner";
@@ -35,12 +36,37 @@ export function CodePanel({
 }) {
   const [copied, setCopied] = useState(false);
   const [selectedPath, setSelectedPath] = useState("index.html");
+  const [draft, setDraft] = useState("");
+  const [draftPath, setDraftPath] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const files = useQuery(
     api.projectFiles.list,
     projectId ? { projectId } : "skip",
   );
+  const saveFile = useMutation(api.projectFiles.upsert);
   const selectedFile = files?.find((file) => file.path === selectedPath);
   const content = selectedFile?.content ?? html;
+
+  const editorContent = draftPath === selectedPath ? draft : content ?? "";
+
+  const saveCurrentFile = async () => {
+    if (!projectId || !draft.trim()) return;
+    setSaving(true);
+    try {
+      await saveFile({
+        projectId,
+        path: selectedPath,
+        content: draft,
+        language: selectedPath.endsWith(".html") ? "html" : undefined,
+        version: selectedFile?.version ?? 0,
+      });
+      toast.success(`Файл ${selectedPath} сохранён`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось сохранить файл");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const downloadProject = () => {
     const exportFiles = files?.length
@@ -86,6 +112,18 @@ export function CodePanel({
           <Button
             type="button"
             variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 text-muted-foreground"
+            onClick={() => void saveCurrentFile()}
+            disabled={!projectId || saving || draftPath !== selectedPath || draft === content}
+            title="Сохранить файл"
+          >
+            {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+            Сохранить
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
             size="icon-sm"
             className="text-muted-foreground"
             onClick={downloadProject}
@@ -124,7 +162,17 @@ export function CodePanel({
             <button
               key={file.path}
               type="button"
-              onClick={() => setSelectedPath(file.path)}
+              onClick={() => {
+                setSelectedPath(file.path);
+                setDraftPath(file.path);
+                setDraft(
+                  file.path === selectedPath
+                    ? editorContent
+                    : "content" in file
+                      ? file.content
+                      : "",
+                );
+              }}
               className={cn(
                 "flex w-full items-center rounded px-2 py-1.5 text-left text-[11px] transition-colors",
                 file.path === selectedPath
@@ -136,11 +184,18 @@ export function CodePanel({
             </button>
           ))}
         </div>
-        <ScrollArea className="min-h-0 flex-1">
-          <pre className="p-4 text-[11px] leading-[1.6] text-muted-foreground">
-            <code>{content}</code>
-          </pre>
-        </ScrollArea>
+        <div className="min-h-0 flex-1 overflow-hidden p-2 sm:p-0">
+          <Textarea
+            value={editorContent}
+            onChange={(event) => {
+              setDraftPath(selectedPath);
+              setDraft(event.target.value);
+            }}
+            spellCheck={false}
+            aria-label={`Содержимое файла ${selectedPath}`}
+            className="h-full min-h-64 resize-none rounded-none border-0 bg-transparent p-3 font-mono text-[11px] leading-[1.6] shadow-none focus-visible:ring-0 sm:p-4"
+          />
+        </div>
       </div>
     </div>
   );

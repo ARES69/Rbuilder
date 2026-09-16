@@ -27,18 +27,25 @@ interface TraceEntry {
   ms: number;
 }
 
+interface GeneratedFile {
+  path: string;
+  content: string;
+  language?: string;
+}
+
 const CONTEXT_PROMPT = `You are the context agent in a web-app building pipeline. Given the user's request and optional attached files, produce a concise brief: what kind of app is needed, key screens/features, and any requirements from the attachments. Reply in 3-6 bullet points. No preamble.`;
 
 const PLAN_PROMPT = `You are the planner agent in a web-app building pipeline. Given a brief and the current app code (if any), decide the implementation steps. Reply with 3-6 short imperative steps, one per line, no numbering. Focus on what changes and what stays intact.`;
 
-const BUILD_PROMPT = `You are RBuilder, an expert web app builder. The user describes an app; you return a complete, working single-file web app.
+const BUILD_PROMPT = `You are RBuilder, an expert web app builder. Return a complete working project as a JSON file manifest.
 
 STRICT OUTPUT RULES:
-1. Output ONLY raw HTML. No markdown fences, no explanation, no commentary.
-2. The document must be fully self-contained: inline <style> and <script> only. No external requests except Google Fonts.
-3. Start with <!DOCTYPE html> and include <html>, <head> with <meta charset>, <meta viewport>, and <title>, then <body>.
-4. Make it beautiful: intentional typography, spacing, a restrained color palette, hover states, and responsive layout. Vanilla JS is fine.
-5. Fully implement the described functionality — working state, event handlers, and realistic seed data. Never leave stubs.
+1. Output ONLY valid JSON. No markdown fences, no explanation, no commentary.
+2. Use this exact shape: {"files":[{"path":"index.html","content":"...","language":"html"}]}. Always include index.html.
+3. You may include additional files such as src/App.tsx, src/styles.css, package.json and README.md when they make the project clearer. Each file must be complete.
+4. index.html must be directly previewable: include a complete document with inline styles/scripts when the project does not have a build setup.
+5. Make it beautiful: intentional typography, spacing, a restrained color palette, hover states, and responsive layout.
+6. Fully implement the described functionality — working state, event handlers, and realistic seed data. Never leave stubs.
 
 If a previous version of the app is provided, treat it as the current code and apply the plan, keeping everything else intact.`;
 
@@ -55,6 +62,28 @@ function extractHtml(raw: string): string {
   const body = fenced ? fenced[1] : text;
   const doc = body.match(/<!DOCTYPE html[\s\S]*<\/html>/i);
   return (doc ? doc[0] : body).trim();
+}
+
+function extractProjectFiles(raw: string): GeneratedFile[] {
+  const text = raw.trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : text;
+  try {
+    const parsed = JSON.parse(candidate) as { files?: unknown };
+    if (Array.isArray(parsed.files)) {
+      const files = parsed.files.filter(
+        (file): file is GeneratedFile =>
+          typeof file === "object" &&
+          file !== null &&
+          typeof (file as { path?: unknown }).path === "string" &&
+          typeof (file as { content?: unknown }).content === "string",
+      );
+      if (files.length > 0) return files.slice(0, 50);
+    }
+  } catch {
+    // Older/provider models may still return raw HTML; keep that format working.
+  }
+  return [{ path: "index.html", content: extractHtml(raw), language: "html" }];
 }
 
 function escapeHtml(text: string): string {
@@ -300,10 +329,15 @@ export const run = action({
       buildInput,
       16000,
     );
-    let html = extractHtml(raw);
+    let files = extractProjectFiles(raw);
+    let html = files.find((file) => file.path === "index.html")?.content ?? extractHtml(raw);
     if (!html) {
       throw new Error("The model returned an empty response. Please try again.");
     }
+    files = files.map((file) => ({
+      ...file,
+      path: file.path.trim().replace(/^\/+/, ""),
+    })).filter((file) => file.path && !file.path.includes(".."));
     trace.push({
       agent: "builder",
       note: `wrote v${(previousHtml?.length ?? 0) > 0 ? "update" : "1"} (${html.length} chars)`,
@@ -314,7 +348,15 @@ export const run = action({
     t0 = Date.now();
     if (!useReviewer) {
       trace.push({ agent: "reviewer", note: "skipped (reviewer off)", ms: 0 });
-      return { html: truncate(html, MAX_HTML_CHARS), demo: false, trace };
+      return {
+        html: truncate(html, MAX_HTML_CHARS),
+        files: files.map((file) => ({
+          ...file,
+          content: file.path === "index.html" ? truncate(file.content, MAX_HTML_CHARS) : file.content,
+        })),
+        demo: false,
+        trace,
+      };
     }
     const review = await callModel(
       apiKey,
@@ -339,13 +381,25 @@ export const run = action({
         fixInput,
         16000,
       );
-      const repairedHtml = extractHtml(repaired);
-      if (repairedHtml) html = repairedHtml;
+      const repairedFiles = extractProjectFiles(repaired);
+      const repairedHtml = repairedFiles.find((file) => file.path === "index.html")?.content ?? extractHtml(repaired);
+      if (repairedHtml) {
+        html = repairedHtml;
+        files = repairedFiles;
+      }
       trace.push({ agent: "reviewer", note: "requested fixes, rebuilt", ms: Date.now() - t0 });
     } else {
       trace.push({ agent: "reviewer", note: "approved the build", ms: Date.now() - t0 });
     }
 
-    return { html: truncate(html, MAX_HTML_CHARS), demo: false, trace };
+    return {
+      html: truncate(html, MAX_HTML_CHARS),
+      files: files.map((file) => ({
+        ...file,
+        content: file.path === "index.html" ? truncate(file.content, MAX_HTML_CHARS) : file.content,
+      })),
+      demo: false,
+      trace,
+    };
   },
 });

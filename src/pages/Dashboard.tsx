@@ -269,7 +269,9 @@ export default function Dashboard() {
         html: result.html,
         demo: result.demo,
         trace: result.trace,
-        files: [{ path: "index.html", content: result.html, language: "html" }],
+        files: result.files?.length
+          ? result.files
+          : [{ path: "index.html", content: result.html, language: "html" }],
       });
       // A demo/fallback result is not a billable generation. Consume only after
       // a real build has completed, so missing or invalid provider keys do not
