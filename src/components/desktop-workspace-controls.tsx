@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, Download, FolderOpen, GitBranch, GitCommitHorizontal, Loader2, RefreshCw, Terminal, Upload } from "lucide-react";
+import { Archive, Download, FileCode2, FolderOpen, GitBranch, GitCommitHorizontal, Loader2, RefreshCw, Save, Terminal, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { getDesktopRuntime, type DesktopRuntime, type GitStatus } from "@/lib/desktop-bridge";
+import { getDesktopRuntime, type DesktopFileEntry, type DesktopRuntime, type GitStatus } from "@/lib/desktop-bridge";
 
 export function DesktopWorkspaceControls() {
   const [runtime] = useState<DesktopRuntime>(() => getDesktopRuntime());
@@ -40,6 +40,12 @@ export function DesktopWorkspaceControls() {
   const [terminalCommand, setTerminalCommand] = useState("bun test");
   const [terminalOutput, setTerminalOutput] = useState("");
   const [terminalRunning, setTerminalRunning] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [files, setFiles] = useState<DesktopFileEntry[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState("");
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileSaving, setFileSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
     title: string;
     description: string;
@@ -134,6 +140,54 @@ export function DesktopWorkspaceControls() {
     setNewBranch("");
   };
 
+  const openFiles = async () => {
+    if (!runtime.available || !root) {
+      toast.info("Файлы доступны после подключения RBuilder Desktop.");
+      return;
+    }
+    setFileLoading(true);
+    try {
+      const entries = (await runtime.listFiles(root)).filter((entry) => entry.kind === "file");
+      setFiles(entries);
+      setFilesOpen(true);
+      if (entries[0]) {
+        setSelectedFile(entries[0].path);
+        setFileContent(await runtime.readFile(entries[0].path));
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось прочитать файловое дерево");
+    } finally {
+      setFileLoading(false);
+    }
+  };
+
+  const selectFile = async (path: string) => {
+    if (!runtime.available) return;
+    setFileLoading(true);
+    try {
+      setSelectedFile(path);
+      setFileContent(await runtime.readFile(path));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось прочитать файл");
+    } finally {
+      setFileLoading(false);
+    }
+  };
+
+  const saveFile = async () => {
+    if (!runtime.available || !selectedFile) return;
+    setFileSaving(true);
+    try {
+      await runtime.writeFile(selectedFile, fileContent);
+      toast.success("Файл сохранён");
+      if (root) await refreshGit(root);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось сохранить файл");
+    } finally {
+      setFileSaving(false);
+    }
+  };
+
   const executeTerminal = async () => {
     const commandLine = terminalCommand.trim();
     if (!runtime.available || !root || !commandLine) {
@@ -216,6 +270,18 @@ export function DesktopWorkspaceControls() {
         >
           {gitLoading ? <Loader2 className="size-3.5 animate-spin" /> : <GitCommitHorizontal className="size-3.5" />}
           Git
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="hidden h-8 gap-1.5 px-2 text-xs text-muted-foreground lg:inline-flex"
+          onClick={() => void openFiles()}
+          disabled={fileLoading}
+          title="Открыть локальные файлы"
+        >
+          {fileLoading ? <Loader2 className="size-3.5 animate-spin" /> : <FileCode2 className="size-3.5" />}
+          Файлы
         </Button>
         <Button
           type="button"
@@ -330,6 +396,35 @@ export function DesktopWorkspaceControls() {
               Создать commit
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={filesOpen} onOpenChange={setFilesOpen}>
+        <DialogContent className="max-h-[85vh] sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base"><FileCode2 className="size-4" /> Локальные файлы</DialogTitle>
+            <DialogDescription className="truncate text-xs">{root ?? "не подключены"}</DialogDescription>
+          </DialogHeader>
+          <div className="grid min-h-0 gap-3 md:grid-cols-[minmax(0,0.35fr)_minmax(0,0.65fr)]">
+            <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border/70 p-2">
+              {files.length ? files.map((entry) => (
+                <button key={entry.path} type="button" onClick={() => void selectFile(entry.path)} className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs ${selectedFile === entry.path ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/50"}`}>
+                  <FileCode2 className="size-3.5 shrink-0" /><span className="truncate" title={entry.path}>{entry.path}</span>
+                </button>
+              )) : <p className="p-2 text-xs text-muted-foreground">Файлы не найдены</p>}
+            </div>
+            <div className="min-w-0 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-xs font-medium">{selectedFile ?? "Выберите файл"}</span>
+                <Button type="button" size="sm" onClick={() => void saveFile()} disabled={fileSaving || fileLoading || !selectedFile}>
+                  {fileSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} Сохранить
+                </Button>
+              </div>
+              <Textarea value={fileContent} onChange={(event) => setFileContent(event.target.value)} disabled={fileLoading || !selectedFile} className="min-h-[48vh] resize-none font-mono text-xs leading-5" spellCheck={false} />
+              <p className="text-[10px] text-muted-foreground">Сохранение изменяет файл на локальном диске и появится в Git diff.</p>
+            </div>
+          </div>
+          <DialogFooter><Button type="button" variant="ghost" size="sm" onClick={() => setFilesOpen(false)}>Закрыть</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
