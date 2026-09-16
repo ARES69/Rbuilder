@@ -24,6 +24,11 @@ import {
 import { SNIPPETS, SNIPPET_CATEGORIES } from "./snippets";
 import { PROMPT_PRESETS } from "./prompt-presets";
 import {
+  getDesktopRuntime,
+  isDesktopRuntime,
+  DESKTOP_COMMANDS,
+} from "./desktop-bridge";
+import {
   TOOLS,
   TOOL_GROUPS,
   defaultEnabledToolIds,
@@ -214,6 +219,27 @@ describe("snippets and prompt presets", () => {
     for (const preset of PROMPT_PRESETS) {
       expect(preset.prompt.length).toBeGreaterThan(40);
     }
+  });
+});
+
+/* ---------------------------- desktop bridge ---------------------------- */
+
+describe("desktop bridge", () => {
+  test("falls back safely in the browser and exposes an allow-listed contract", () => {
+    const runtime = getDesktopRuntime();
+    expect(runtime.available).toBe(false);
+    expect(isDesktopRuntime(runtime)).toBe(false);
+    expect(Object.values(DESKTOP_COMMANDS)).toEqual([
+      "workspace_pick",
+      "workspace_list_files",
+      "workspace_read_file",
+      "workspace_write_file",
+      "git_status",
+      "git_diff",
+      "git_commit",
+      "terminal_run",
+      "preview_start",
+    ]);
   });
 });
 
