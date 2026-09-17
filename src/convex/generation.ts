@@ -1,5 +1,7 @@
 import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
+import type { ActionCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { getModel, getProvider } from "../lib/models";
 import {
@@ -74,6 +76,8 @@ interface Target {
   chatUrl: string;
   apiKey: string;
   providerLabel: string;
+  /** When true, calls go through the browser relay, not `chatUrl`. */
+  relay?: boolean;
 }
 
 const CONTEXT_PROMPT = `You are the context agent in a web-app building pipeline. Given the user's request and optional attached files, produce a concise brief: what kind of app is needed, key screens/features, and any requirements from the attachments. Reply in 3-6 bullet points. No preamble.`;
@@ -147,6 +151,58 @@ async function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * How long a browser-relayed local-model call may stay unanswered. Bounded so
+ * the pipeline action cannot hang forever on a machine that is switched off.
+ */
+const RELAY_TIMEOUT_MS = 90_000;
+const RELAY_POLL_MS = 1_500;
+
+/**
+ * Run one model call through the browser relay (LM Studio / Ollama on the
+ * user's own machine). The request is parked in `modelRelay`; the
+ * LocalModelBridge component in the user's open dashboard tab forwards it to
+ * their local endpoint and fulfils the row. Convex itself can never reach a
+ * user's localhost — their browser can.
+ */
+async function relayCall(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+  apiModel: string,
+  system: string,
+  user: string,
+  maxTokens: number,
+): Promise<{ text: string; usage: { promptTokens: number; completionTokens: number } }> {
+  const relayId = await ctx.runMutation(internal.modelRelay.enqueue, {
+    userId,
+    apiModel,
+    system,
+    user,
+    maxTokens,
+  });
+  const deadline = Date.now() + RELAY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const row = await ctx.runQuery(internal.modelRelay.get, { relayId });
+    if (!row) throw new Error("Локальный мост: запрос потерян.");
+    if (row.status === "done" && typeof row.result === "string") {
+      await ctx.runMutation(internal.modelRelay.cleanup, { userId });
+      return {
+        text: row.result,
+        usage: row.usage ?? { promptTokens: 0, completionTokens: 0 },
+      };
+    }
+    if (row.status === "error") {
+      throw new Error(
+        `Локальная модель недоступна: ${row.error ?? "мост вернул ошибку"}`,
+      );
+    }
+    await sleep(RELAY_POLL_MS);
+  }
+  throw new Error(
+    "Локальный мост не ответил. Запустите LM Studio/Ollama и держите вкладку RBuilder открытой (модель: «Локальная модель» в списке).",
+  );
+}
+
+/**
  * One model call, with retry on transient failures.
  *
  * Failures are translated into readable messages — the provider body is never
@@ -158,8 +214,25 @@ async function callModel(
   system: string,
   user: string,
   maxTokens: number,
-  options?: { json?: boolean },
+  options?: {
+    json?: boolean;
+    /** When set, the call is relayed through the user's browser instead. */
+    relay?: { ctx: ActionCtx; userId: Id<"users"> };
+  },
 ): Promise<{ text: string; usage: Usage }> {
+  if (target.relay) {
+    if (!options?.relay) {
+      throw new Error("Локальная модель требует relay-контекст вызова.");
+    }
+    return await relayCall(
+      options.relay.ctx,
+      options.relay.userId,
+      apiModel,
+      system,
+      user,
+      maxTokens,
+    );
+  }
   let lastError: Error | null = null;
   const attempts = 2;
   // `response_format` is not supported by every OpenAI-compatible gateway, so
@@ -246,28 +319,42 @@ export const plan = action({
     modelId: v.optional(v.string()),
     architectureId: v.optional(v.string()),
   },
-  handler: async (ctx, { prompt, modelId, architectureId }) => {
+  handler: async (
+    ctx,
+    { prompt, modelId, architectureId },
+  ): Promise<{ plan: string; demo: boolean; model: string }> => {
     const user = await ctx.runQuery(api.users.currentUser);
     if (!user) throw new Error("Not authenticated");
 
     const model = getModel(modelId);
     const provider = getProvider(model.provider);
     const endpoint = resolveProviderEndpoint(provider, (name) => process.env[name]);
-    if (!endpoint.apiKey) {
+    // Local provider without an env-side endpoint goes through the browser
+    // relay: the plan is still real model output, just via the user's machine.
+    const viaRelay = provider.id === "local" && !endpoint.apiKey;
+    if (!endpoint.apiKey && !viaRelay) {
       return { plan: fallbackPlan(prompt), demo: true, model: model.apiModel };
     }
     const contract = architectureContract(architectureId);
-    const result = await callModel(
-      {
-        chatUrl: endpoint.chatUrl,
-        apiKey: endpoint.apiKey,
-        providerLabel: provider.label,
-      },
-      apiModelFor(model.provider, model.apiModel),
-      PLANNING_PROMPT,
-      `${contract}\n\nЗапрос пользователя:\n${prompt}`,
-      900,
-    );
+    const planInput = `${contract}\n\nЗапрос пользователя:\n${prompt}`;
+    const result = viaRelay
+      ? await ctx.runAction(api.modelRelay.call, {
+          apiModel: apiModelFor(model.provider, model.apiModel),
+          system: PLANNING_PROMPT,
+          user: planInput,
+          maxTokens: 900,
+        })
+      : await callModel(
+          {
+            chatUrl: endpoint.chatUrl,
+            apiKey: endpoint.apiKey,
+            providerLabel: provider.label,
+          },
+          apiModelFor(model.provider, model.apiModel),
+          PLANNING_PROMPT,
+          planInput,
+          900,
+        );
     return {
       plan: result.text.trim() || fallbackPlan(prompt),
       demo: false,
@@ -277,7 +364,7 @@ export const plan = action({
 });
 
 /** The local provider's model id is a deployment setting, not a catalog fact. */
-function apiModelFor(provider: string, apiModel: string): string {
+export function apiModelFor(provider: string, apiModel: string): string {
   if (provider === "local") return process.env.LOCAL_MODEL_ID ?? apiModel;
   return apiModel;
 }
@@ -334,10 +421,14 @@ export const runForUser = internalAction({
     const provider = getProvider(model.provider);
     const endpoint = resolveProviderEndpoint(provider, (name) => process.env[name]);
     const apiModel = apiModelFor(model.provider, model.apiModel);
+    // Local provider with no env-side endpoint: every call is relayed through
+    // the user's browser to their own LM Studio / Ollama. No key required.
+    const viaRelay = provider.id === "local" && !endpoint.apiKey;
     const target: Target = {
       chatUrl: endpoint.chatUrl,
       apiKey: endpoint.apiKey,
       providerLabel: provider.label,
+      ...(viaRelay ? { relay: true } : {}),
     };
     const contract = architectureContract(architectureId);
     const total: Usage = { promptTokens: 0, completionTokens: 0 };
@@ -366,7 +457,10 @@ export const runForUser = internalAction({
       maxTokens: number,
       options?: { json?: boolean },
     ) => {
-      const result = await callModel(target, apiModel, system, user, maxTokens, options);
+      const result = await callModel(target, apiModel, system, user, maxTokens, {
+        ...options,
+        ...(viaRelay ? { relay: { ctx, userId } } : {}),
+      });
       total.promptTokens += result.usage.promptTokens;
       total.completionTokens += result.usage.completionTokens;
       return result.text;
@@ -427,8 +521,9 @@ export const runForUser = internalAction({
 
     // The model the user picked must actually be reachable. Without a key we
     // say exactly what is missing instead of quietly answering with another
-    // provider's model (which used to surface as a confusing 404).
-    if (!endpoint.apiKey) {
+    // provider's model (which used to surface as a confusing 404). The local
+    // relay provider needs no key — it runs on the user's own machine.
+    if (!endpoint.apiKey && !viaRelay) {
       return {
         html: truncate(
           fallbackHtml(prompt, missingKeyMessage(provider, endpoint)),

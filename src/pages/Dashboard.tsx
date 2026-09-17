@@ -37,6 +37,7 @@ import { SkillsPanel } from "@/components/skills-panel";
 import { ToolsPanel } from "@/components/tools-panel";
 import { resolveEnabledTools } from "@/lib/tools";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LocalModelBridge } from "@/components/local-model-bridge";
 import { DesktopStatus } from "@/components/desktop-status";
 import { DesktopWorkspaceControls } from "@/components/desktop-workspace-controls";
 import { Link } from "react-router";
@@ -871,6 +872,12 @@ export default function Dashboard() {
             </Button>
           </div>
         ) : null}
+
+        {/* Browser relay for locally hosted models — must stay mounted for
+            the "Локальная модель" picker entry to work. */}
+        <div className="mb-2">
+          <LocalModelBridge />
+        </div>
 
         <Textarea
           value={input}

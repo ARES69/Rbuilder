@@ -101,13 +101,16 @@ export const MODELS: ModelDef[] = [
     apiModel: "gpt-4o",
   },
   {
-    id: "local-model",
-    name: "Локальный шлюз",
+    id: "local-auto",
+    name: "Локальная модель",
     provider: "local",
     access: "full-and-limited",
     costsSession: false,
     context: "Зависит от модели",
-    bestFor: "Ollama / vLLM / LM Studio на своём железе, без биллинга",
+    bestFor:
+      "LM Studio / Ollama на вашем компьютере: приватно, бесплатно, без ключей. Нужен открытый RBuilder и запущенный локальный сервер.",
+    dataNotice:
+      "Запросы обрабатываются на вашем компьютере через браузер — код не покидает машину.",
     // Overridable per deployment with LOCAL_MODEL_ID (see generation.ts).
     apiModel: "llama3.1",
   },

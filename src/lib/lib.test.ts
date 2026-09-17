@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { MODELS, getModel, DEFAULT_MODEL_ID, DAILY_SESSION_LIMIT } from "./models";
 import {
+  LOCAL_PRESETS,
+  isLocalUrl,
+  localChatUrl,
+  parseRelayPayload,
+  relayRequestBody,
+  relayResponsePayload,
+} from "./local-model";
+import {
   DEFAULT_PROVIDER,
   PROVIDERS,
   estimateCostRub,
@@ -1202,5 +1210,78 @@ describe("HTTP helpers", () => {
     expect(API_DOCS.generate.path).toBe("/v1/generate");
     expect(API_DOCS.models.path).toBe("/v1/models");
     expect(JSON.parse(API_DOCS.generate.body).prompt.length).toBeGreaterThan(10);
+  });
+});
+
+describe("local-model bridge helpers", () => {
+  test("parseRelayPayload accepts a well-formed answer with usage", () => {
+    const result = parseRelayPayload(
+      JSON.stringify({
+        text: "готово",
+        usage: { promptTokens: 12, completionTokens: 34 },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.text).toBe("готово");
+      expect(result.value.usage?.completionTokens).toBe(34);
+    }
+  });
+
+  test("parseRelayPayload maps an explicit error to a failure", () => {
+    const result = parseRelayPayload(JSON.stringify({ error: "connection refused" }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("connection refused");
+  });
+
+  test("parseRelayPayload rejects non-JSON and missing text", () => {
+    expect(parseRelayPayload("not json").ok).toBe(false);
+    expect(parseRelayPayload(JSON.stringify({ usage: {} })).ok).toBe(false);
+    expect(parseRelayPayload(JSON.stringify([1, 2])).ok).toBe(false);
+  });
+
+  test("localChatUrl normalizes base urls", () => {
+    expect(localChatUrl("http://127.0.0.1:1234")).toBe("http://127.0.0.1:1234/v1/chat/completions");
+    expect(localChatUrl("http://127.0.0.1:11434/v1/")).toBe("http://127.0.0.1:11434/v1/chat/completions");
+    expect(localChatUrl("http://localhost:8000/v1/chat/completions")).toBe(
+      "http://localhost:8000/v1/chat/completions",
+    );
+  });
+
+  test("isLocalUrl only accepts loopback hosts", () => {
+    expect(isLocalUrl("http://127.0.0.1:1234/v1")).toBe(true);
+    expect(isLocalUrl("http://localhost:11434")).toBe(true);
+    expect(isLocalUrl("https://api.example.com/v1")).toBe(false);
+    expect(isLocalUrl("http://192.168.1.5:1234")).toBe(false);
+  });
+
+  test("relayRequestBody shapes an OpenAI-compatible request", () => {
+    const body = JSON.parse(
+      relayRequestBody({ apiModel: "llama3.1", system: "s", user: "u", maxTokens: 128 }),
+    );
+    expect(body.model).toBe("llama3.1");
+    expect(body.messages).toEqual([
+      { role: "system", content: "s" },
+      { role: "user", content: "u" },
+    ]);
+    expect(body.max_tokens).toBe(128);
+  });
+
+  test("relayResponsePayload converts provider shape to relay shape", () => {
+    const payload = JSON.parse(
+      relayResponsePayload({
+        choices: [{ message: { content: "hi" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 7 },
+      }),
+    );
+    expect(payload.text).toBe("hi");
+    expect(payload.usage).toEqual({ promptTokens: 5, completionTokens: 7 });
+  });
+
+  test("presets point at loopback ports", () => {
+    expect(LOCAL_PRESETS.length).toBeGreaterThanOrEqual(2);
+    for (const preset of LOCAL_PRESETS) {
+      expect(isLocalUrl(preset.url)).toBe(true);
+    }
   });
 });

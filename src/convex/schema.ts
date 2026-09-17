@@ -219,6 +219,32 @@ const schema = defineSchema(
       .index("by_slug", ["slug"])
       .index("by_project", ["projectId"]),
 
+    // Browser relay for locally-hosted models (LM Studio / Ollama). A Convex
+    // action cannot reach the user's 127.0.0.1, but their browser can: the
+    // pipeline parks a request here, the LocalModelBridge in the dashboard
+    // forwards it to the local OpenAI-compatible endpoint and fulfils the row.
+    modelRelay: defineTable({
+      userId: v.id("users"),
+      apiModel: v.string(),
+      system: v.string(),
+      user: v.string(),
+      maxTokens: v.number(),
+      status: v.union(
+        v.literal("pending"),
+        v.literal("done"),
+        v.literal("error"),
+      ),
+      result: v.optional(v.string()),
+      error: v.optional(v.string()),
+      usage: v.optional(
+        v.object({
+          promptTokens: v.number(),
+          completionTokens: v.number(),
+        }),
+      ),
+      createdAt: v.number(),
+    }).index("by_user", ["userId"]),
+
     // daily build sessions for session-based models (6/day, Freebuff-style)
     sessions: defineTable({
       userId: v.id("users"),
