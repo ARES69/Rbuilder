@@ -25,6 +25,18 @@ import {
   truncate,
 } from "./generation-core";
 import { describeElement, formatElementContext, pickedElementPrompt } from "./element-context";
+import {
+  detectPatterns,
+  formatUserPatterns,
+  mergePatterns,
+  rankPatterns,
+} from "./patterns";
+import {
+  ANTI_PATTERN_RULES,
+  countIssues,
+  detectAntiPatterns,
+  issuesToPrompt,
+} from "./anti-patterns";
 import { isValidSlug, publishUrl, shortHost, siteBaseUrl, slugify } from "./deploy";
 import { BUILT_IN_SKILLS, parseCustomSkill, SKILL_CATEGORIES } from "./skills";
 import { STARTER_TEMPLATES } from "./templates";
@@ -863,5 +875,213 @@ describe("element context", () => {
   test("composer text names the element", () => {
     expect(pickedElementPrompt(context)).toContain("main > section.hero > button.primary");
     expect(pickedElementPrompt(context)).toContain("Найти туры");
+  });
+});
+
+/* --------------------------- learned preferences -------------------------- */
+
+describe("learned preferences", () => {
+  test("a manual edit that adds autoComplete is learned", () => {
+    const before = '<input type="email" />';
+    const after = '<input type="email" autoComplete="email" />';
+    const detected = detectPatterns(before, after, "src/Login.tsx");
+    expect(detected.map((p) => p.kind)).toContain("form.autocomplete");
+    const pattern = detected.find((p) => p.kind === "form.autocomplete")!;
+    expect(pattern.statement).toContain("autoComplete");
+    expect(pattern.evidence).toContain("autoComplete");
+  });
+
+  test("form hardening and accessibility edits are recognised", () => {
+    const before = '<button onClick={send}>Отправить</button>';
+    const after = [
+      '<button onClick={send} disabled={isSubmitting} className="cursor-pointer">Отправить</button>',
+      '<div role="button" aria-label="Открыть" onClick={open} />',
+    ].join("\n");
+    const kinds = detectPatterns(before, after, "src/Form.tsx").map((p) => p.kind);
+    expect(kinds).toContain("form.no-double-submit");
+    expect(kinds).toContain("ui.cursor");
+    expect(kinds).toContain("a11y.role-button");
+    expect(kinds).toContain("a11y.aria");
+  });
+
+  test("a new palette colour is remembered", () => {
+    const detected = detectPatterns(
+      ".card { color: #111111; }",
+      ".card { color: #0f172a; }",
+      "src/styles.css",
+    );
+    const palette = detected.find((p) => p.kind === "style.palette");
+    expect(palette).toBeDefined();
+    expect(palette!.statement).toContain("#0f172a");
+  });
+
+  test("nothing is learned from an unchanged or shrinking file", () => {
+    expect(detectPatterns("same", "same", "a.ts")).toEqual([]);
+    expect(
+      detectPatterns('const x = "autoComplete=x";', 'const x = "";', "a.ts"),
+    ).toEqual([]);
+  });
+
+  test("repeated observations raise strength and cap evidence", () => {
+    let rows = mergePatterns([], detectPatterns("a", "b autoComplete=\"email\"", "f.tsx"));
+    for (let i = 0; i < 8; i += 1) {
+      rows = mergePatterns(rows, detectPatterns("a", `b autoComplete="e${i}"`, "f.tsx"));
+    }
+    const row = rows.find((r) => r.kind === "form.autocomplete")!;
+    expect(row.strength).toBe(9);
+    expect(row.evidence.length).toBeLessThanOrEqual(5);
+  });
+
+  test("prompt block lists the strongest preferences first", () => {
+    const rows = [
+      { kind: "a", statement: "слабое", evidence: [], strength: 1 },
+      { kind: "b", statement: "сильное", evidence: [], strength: 5 },
+    ];
+    expect(rankPatterns(rows)[0].kind).toBe("b");
+    const block = formatUserPatterns(rows);
+    expect(block).toContain("сильное");
+    expect(block).toContain("5 раз");
+    expect(block).toContain("ПОСТОЯННЫЕ ПРЕДПОЧТЕНИЯ");
+    expect(formatUserPatterns([])).toBe("");
+  });
+});
+
+/* ----------------------------- anti-patterns ------------------------------ */
+
+describe("anti-pattern detection", () => {
+  test("a list without key is reported, with key is not", () => {
+    const withoutKey = detectAntiPatterns([
+      { path: "src/App.tsx", content: "{items.map((item) => <li>{item}</li>)}" },
+    ]);
+    expect(withoutKey.some((i) => i.id === "react.map-without-key")).toBe(true);
+
+    const withKey = detectAntiPatterns([
+      {
+        path: "src/App.tsx",
+        content: "{items.map((item) => <li key={item.id}>{item}</li>)}",
+      },
+    ]);
+    expect(withKey.some((i) => i.id === "react.map-without-key")).toBe(false);
+  });
+
+  test("a clickable div without role is an error", () => {
+    const issues = detectAntiPatterns([
+      { path: "index.html", content: '<div onClick="go()">Открыть</div>' },
+    ]);
+    const issue = issues.find((i) => i.id === "a11y.clickable-div");
+    expect(issue?.severity).toBe("error");
+    expect(issue?.line).toBe(1);
+
+    const fine = detectAntiPatterns([
+      { path: "index.html", content: '<div role="button" tabIndex={0} onClick="go()" />' },
+    ]);
+    expect(fine.some((i) => i.id === "a11y.clickable-div")).toBe(false);
+  });
+
+  test("a hardcoded secret is flagged, an env lookup is not", () => {
+    const bad = detectAntiPatterns([
+      { path: "src/api.ts", content: 'const apiKey = "sk-live-1234567890";' },
+    ]);
+    expect(bad.some((i) => i.id === "security.hardcoded-secret")).toBe(true);
+
+    const good = detectAntiPatterns([
+      { path: "src/api.ts", content: 'const apiKey = process.env.API_KEY ?? "";' },
+    ]);
+    expect(good.some((i) => i.id === "security.hardcoded-secret")).toBe(false);
+  });
+
+  test("a fetch in a loop is reported", () => {
+    const issues = detectAntiPatterns([
+      {
+        path: "src/data.ts",
+        content: "for (const id of ids) {\n  const res = await fetch(`/api/${id}`);\n}",
+      },
+    ]);
+    expect(issues.some((i) => i.id === "async.fetch-in-loop")).toBe(true);
+  });
+
+  test("findings are sorted by severity and explain themselves", () => {
+    const issues = detectAntiPatterns([
+      {
+        path: "index.html",
+        content: [
+          "<div onClick=\"x()\">a</div>",
+          "<img src=\"a.png\">",
+          "<script>console.log('debug')</script>",
+        ].join("\n"),
+      },
+    ]);
+    expect(issues[0].severity).toBe("error");
+    const counts = countIssues(issues);
+    expect(counts.total).toBe(issues.length);
+    expect(counts.errors).toBeGreaterThan(0);
+    const prompt = issuesToPrompt(issues);
+    expect(prompt).toContain("index.html:1");
+    expect(prompt).toContain("Ничего другого не меняй");
+  });
+
+  test("non-code files are ignored", () => {
+    const issues = detectAntiPatterns([
+      { path: "README.md", content: "console.log(victim) <div onClick=1>" },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  test("every rule has a unique id, a severity and explainable copy", () => {
+    const ids = new Set(ANTI_PATTERN_RULES.map((rule) => rule.id));
+    expect(ids.size).toBe(ANTI_PATTERN_RULES.length);
+    for (const rule of ANTI_PATTERN_RULES) {
+      expect(rule.detail.length).toBeGreaterThan(30);
+      expect(rule.title.length).toBeGreaterThan(5);
+    }
+  });
+});
+
+/* ------------------------ explained change records ------------------------ */
+
+describe("explained changes", () => {
+  test("the model's reason is kept with the applied patch", () => {
+    const plan = parseEditResponse(
+      JSON.stringify({
+        edits: [
+          {
+            path: "index.html",
+            find: "<button>Отправить</button>",
+            replace: "<button disabled={busy}>Отправить</button>",
+            why: "блокирую кнопку, пока идёт отправка — иначе заказ дублируется",
+          },
+        ],
+      }),
+    );
+    expect(plan.edits[0].why).toContain("дублируется");
+    const result = applyEdits(
+      [{ path: "index.html", content: "<button>Отправить</button>" }],
+      plan,
+    );
+    expect(result.changes).toEqual([
+      {
+        path: "index.html",
+        why: "блокирую кнопку, пока идёт отправка — иначе заказ дублируется",
+      },
+    ]);
+  });
+
+  test("new files carry their reason too, and broken patches explain nothing", () => {
+    const plan = parseEditResponse(
+      JSON.stringify({
+        newFiles: [{ path: "src/Cart.tsx", content: "export default 1;", why: "корзина" }],
+      }),
+    );
+    const result = applyEdits([{ path: "index.html", content: "x" }], plan);
+    expect(result.changes).toEqual([{ path: "src/Cart.tsx", why: "корзина" }]);
+
+    const broken = applyEdits(
+      [{ path: "index.html", content: "x" }],
+      parseEditResponse(
+        JSON.stringify({ edits: [{ path: "index.html", find: "nope", replace: "y", why: "зря" }] }),
+      ),
+    );
+    expect(broken.changes).toEqual([]);
+    expect(broken.failed.length).toBe(1);
   });
 });

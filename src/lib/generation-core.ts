@@ -10,6 +10,13 @@ export interface GeneratedFile {
   path: string;
   content: string;
   language?: string;
+  /** Why this file was changed, when the model explained it. */
+  why?: string;
+}
+
+export interface FileChange {
+  path: string;
+  why: string;
 }
 
 export function truncate(text: string, max: number): string {
@@ -63,6 +70,8 @@ export interface EditOp {
   replace?: string;
   /** Appended to the end of the file. */
   append?: string;
+  /** One short sentence in the user's language: why this change is made. */
+  why?: string;
 }
 
 export interface EditPlan {
@@ -77,7 +86,8 @@ export const EDIT_PROMPT = `You are RBuilder, an expert web app editor. The proj
 
 STRICT OUTPUT RULES:
 1. Output ONLY valid JSON. No markdown fences, no explanation, no commentary.
-2. Shape: {"edits":[{"path":"src/App.tsx","find":"exact existing fragment","replace":"new fragment"}],"newFiles":[{"path":"src/New.tsx","content":"...","language":"tsx"}],"deleteFiles":["src/old.ts"]}
+2. Shape: {"edits":[{"path":"src/App.tsx","find":"exact existing fragment","replace":"new fragment","why":"зачем это изменение"}],"newFiles":[{"path":"src/New.tsx","content":"...","language":"tsx","why":"..."}],"deleteFiles":["src/old.ts"]}
+2b. The \`why\` field is REQUIRED for every edit and new file: one short sentence in Russian, explaining the change to someone learning to code (например «добавил обработчик — раньше кнопка ничего не делала»). No jargon without a reason.
 3. \`find\` must be copied character-for-character from the provided file and must occur exactly once in it. Include enough surrounding lines to be unique. Never invent or paraphrase it.
 4. Put every brand-new file into \`newFiles\` with its complete content, and use \`append\` instead of \`find\`/\`replace\` when the change adds lines to the end of a file.
 5. Send no edit for code you are not changing. Untouched files must not appear in the answer at all.
@@ -117,8 +127,12 @@ export function parseEditResponse(raw: string): EditPlan {
           const find = typeof record.find === "string" ? record.find : undefined;
           const replace = typeof record.replace === "string" ? record.replace : undefined;
           const append = typeof record.append === "string" ? record.append : undefined;
-          if (append && !find) return { path, append };
-          if (find && replace !== undefined) return { path, find, replace };
+          const why =
+            typeof record.why === "string" && record.why.trim()
+              ? record.why.trim().slice(0, 240)
+              : undefined;
+          if (append && !find) return { path, append, why };
+          if (find && replace !== undefined) return { path, find, replace, why };
           return null;
         })
         .filter((edit): edit is EditOp => edit !== null)
@@ -136,6 +150,10 @@ export function parseEditResponse(raw: string): EditPlan {
             path,
             content: record.content,
             language: typeof record.language === "string" ? record.language : undefined,
+            why:
+              typeof record.why === "string" && record.why.trim()
+                ? record.why.trim().slice(0, 240)
+                : undefined,
           };
         })
         .filter((file): file is GeneratedFile => file !== null)
@@ -160,6 +178,8 @@ export interface AppliedEdits {
   created: number;
   /** Human-readable reasons for patches that could not be applied. */
   failed: string[];
+  /** "What changed and why", in the order the model explained it. */
+  changes: FileChange[];
 }
 
 /** Apply a patch plan on top of the current files. Never mutates its input. */
@@ -169,6 +189,7 @@ export function applyEdits(
 ): AppliedEdits {
   const byPath = new Map(current.map((file) => [file.path, { ...file }]));
   const failed: string[] = [];
+  const changes: FileChange[] = [];
   let applied = 0;
   let created = 0;
 
@@ -181,6 +202,7 @@ export function applyEdits(
     if (edit.append) {
       file.content = `${file.content.replace(/\s*$/, "")}\n${edit.append.trim()}\n`;
       applied += 1;
+      if (edit.why) changes.push({ path: edit.path, why: edit.why });
       continue;
     }
     const find = edit.find ?? "";
@@ -196,11 +218,13 @@ export function applyEdits(
     file.content =
       file.content.slice(0, index) + edit.replace + file.content.slice(index + find.length);
     applied += 1;
+    if (edit.why) changes.push({ path: edit.path, why: edit.why });
   }
 
   for (const file of plan.newFiles) {
     byPath.set(file.path, { ...file });
     created += 1;
+    if (file.why) changes.push({ path: file.path, why: file.why });
   }
 
   for (const path of plan.deleteFiles) {
@@ -213,7 +237,7 @@ export function applyEdits(
     return a.path.localeCompare(b.path);
   });
 
-  return { files, applied: applied + created, created, failed };
+  return { files, applied: applied + created, created, failed, changes };
 }
 
 /** Whether a plan actually changes anything. */

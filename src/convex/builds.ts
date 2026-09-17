@@ -26,8 +26,12 @@ export const commit = mutation({
         }),
       ),
     ),
+    /** "Что и почему изменилось" — the model's own explanation per file. */
+    changes: v.optional(
+      v.array(v.object({ path: v.string(), why: v.string() })),
+    ),
   },
-  handler: async (ctx, { projectId, html, demo, trace, files }) => {
+  handler: async (ctx, { projectId, html, demo, trace, files, changes }) => {
     const user = await getCurrentUser(ctx);
     if (!user) throw new Error("Not authenticated");
     const project = await ctx.db.get(projectId);
@@ -95,6 +99,7 @@ export const commit = mutation({
           : "Сборка не выполнена: не настроен ключ выбранной модели. Добавьте API-ключ в настройках проекта и повторите запрос."
         : `Сборка завершена — версия v${version} доступна в превью.`,
       trace,
+      changes: changes?.slice(0, 60),
     });
 
     return { version };

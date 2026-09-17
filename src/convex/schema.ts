@@ -95,6 +95,15 @@ const schema = defineSchema(
       projectId: v.id("projects"),
       role: messageRoleValidator,
       content: v.string(),
+      /** Per-file reasons for the changes in this build ("что и почему"). */
+      changes: v.optional(
+        v.array(
+          v.object({
+            path: v.string(),
+            why: v.string(),
+          }),
+        ),
+      ),
       trace: v.optional(
         v.array(
           v.object({
@@ -158,6 +167,24 @@ const schema = defineSchema(
     })
       .index("by_user", ["userId"])
       .index("by_user_created", ["userId", "createdAt"]),
+
+    // Preferences the agent learned by watching the user's own manual edits in
+    // the Code panel. This is the part of "memory" that belongs to the user and
+    // cannot be copied by a competitor, because it is derived from their work.
+    userPatterns: defineTable({
+      userId: v.id("users"),
+      /** Stable detector id, e.g. "form.autocomplete". */
+      kind: v.string(),
+      /** Instruction-shaped sentence injected into the pipeline. */
+      statement: v.string(),
+      /** Short snippets that produced the pattern (newest first). */
+      evidence: v.array(v.string()),
+      /** How often the same preference was observed. */
+      strength: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_user_kind", ["userId", "kind"]),
 
     // Published apps. A deployment is the shareable artefact of a project:
     // a stable slug served over HTTP, plus its visit count.

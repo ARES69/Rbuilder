@@ -27,6 +27,8 @@ import {
   type GeneratedFile,
 } from "../lib/generation-core";
 import { decideRateLimit } from "./usage";
+import { formatUserPatterns } from "../lib/patterns";
+import type { FileChange } from "../lib/generation-core";
 import { architectureContract } from "../lib/architecture";
 import { buildResearchQuery, formatResearch } from "../lib/research";
 import { defaultEnabledToolIds, hasTool, toolDirectives } from "../lib/tools";
@@ -305,6 +307,7 @@ export const run = action({
     };
     const contract = architectureContract(architectureId);
     const total: Usage = { promptTokens: 0, completionTokens: 0 };
+    const changes: FileChange[] = [];
 
     const trace: TraceEntry[] = [];
     /** Announce the stage that is about to run (live progress in the UI). */
@@ -526,11 +529,18 @@ export const run = action({
      * be damaged. If the patch does not land we fall back to a full rebuild
      * once — correctness first, cost second.
      */
+    // Preferences learned from this user's own manual edits. Injected into
+    // every stage that writes code.
+    const learned = await ctx.runQuery(internal.patterns.forPrompt, {
+      userId: user._id,
+    });
+    const patternsBlock = learned.length > 0 ? `\n\n${formatUserPatterns(learned)}` : "";
+
     const produceFiles = async (
       input: string,
       editable: GeneratedFile[],
     ): Promise<{ files: GeneratedFile[]; note: string }> => {
-      const system = `${contract}${skillsBlock}${toolsBlock}`;
+      const system = `${contract}${skillsBlock}${toolsBlock}${patternsBlock}`;
       if (editable.length > 0) {
         const editRaw = await call(`${EDIT_PROMPT}\n\n${system}`, input, 16000, {
           json: true,
@@ -539,6 +549,7 @@ export const run = action({
         if (hasEditWork(plan)) {
           const result = applyEdits(editable, plan);
           if (result.applied > 0) {
+            changes.push(...result.changes);
             return {
               files: result.files,
               note:
@@ -670,6 +681,7 @@ export const run = action({
       })),
       demo: false,
       trace,
+      changes,
       usage: {
         promptTokens: total.promptTokens,
         completionTokens: total.completionTokens,

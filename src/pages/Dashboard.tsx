@@ -18,6 +18,12 @@ import {
   type PreviewElementContext,
 } from "@/lib/element-context";
 import { publishUrl, shortHost } from "@/lib/deploy";
+import {
+  countIssues,
+  detectAntiPatterns,
+  issuesToPrompt,
+  type AntiPatternIssue,
+} from "@/lib/anti-patterns";
 import { PROMPT_PRESETS } from "@/lib/prompt-presets";
 import { WorkspaceTabs, type WorkspaceTab } from "@/components/workspace-tabs";
 import {
@@ -72,6 +78,8 @@ import {
   ClipboardList,
   ExternalLink,
   Layers3,
+  AlertTriangle,
+  Brain,
   FileText,
   Link2,
   Loader2,
@@ -146,6 +154,8 @@ export default function Dashboard() {
   const [previewKey, setPreviewKey] = useState(0);
   const [mobileTab, setMobileTab] = useState<"chat" | "preview">("chat");
   const [pendingModel, setPendingModel] = useState<string | undefined>(undefined);
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
   const [deploying, setDeploying] = useState(false);
   const [slugInput, setSlugInput] = useState("");
@@ -184,6 +194,7 @@ export default function Dashboard() {
   );
   const usage = useQuery(api.usage.summary, {});
   const deployments = useQuery(api.deployments.mine, {});
+  const patterns = useQuery(api.patterns.mine, {});
   // The most recent run doubles as the live progress feed: the pipeline
   // appends each finished stage and sets `step` while a stage is in flight.
   const liveRun = agentRuns?.[0] ?? null;
@@ -332,6 +343,8 @@ export default function Dashboard() {
   const startAgentRun = useMutation(api.workspaces.startRun);
   const finishAgentRun = useMutation(api.workspaces.finishRun);
   const setModelMutation = useMutation(api.projects.setModel);
+  const forgetPattern = useMutation(api.patterns.forget);
+  const clearPatterns = useMutation(api.patterns.clear);
   const publishDeployment = useMutation(api.deployments.publish);
   const unpublishDeployment = useMutation(api.deployments.unpublish);
 
@@ -514,6 +527,7 @@ export default function Dashboard() {
         html: result.html,
         demo: result.demo,
         trace: result.trace,
+        changes: result.changes,
         files: result.files?.length
           ? result.files
           : [{ path: "index.html", content: result.html, language: "html" }],
@@ -581,6 +595,31 @@ export default function Dashboard() {
     [deployments, effectiveProjectId],
   );
   const liveUrl = deployment ? publishUrl(deployment.slug, CONVEX_URL) : null;
+
+  // Static analysis of the current build: what would embarrass the user in
+  // front of a client, found before they publish.
+  const projectFileRows = useQuery(
+    api.projectFiles.list,
+    effectiveProjectId ? { projectId: effectiveProjectId } : "skip",
+  );
+  const projectHtml = selectedProject?.html;
+  const issues = useMemo<AntiPatternIssue[]>(() => {
+    const files = projectFileRows?.length
+      ? projectFileRows.map((file) => ({ path: file.path, content: file.content }))
+      : projectHtml
+        ? [{ path: "index.html", content: projectHtml }]
+        : [];
+    return detectAntiPatterns(files);
+  }, [projectFileRows, projectHtml]);
+  const issueCounts = useMemo(() => countIssues(issues), [issues]);
+
+  const handleFixIssues = () => {
+    setInput(issuesToPrompt(issues));
+    setIssuesOpen(false);
+    setSidebarSection("chat");
+    setMobileTab("chat");
+    toast.info("Проблемы отправлены агенту — проверьте запрос и отправьте");
+  };
 
   /**
    * Publish the current build behind a real, shareable URL.
@@ -689,6 +728,20 @@ export default function Dashboard() {
                 >
                   {message.content}
                 </div>
+                {message.changes && message.changes.length > 0 && (
+                  <div className="mt-1 flex max-w-[85%] flex-col gap-0.5 border-l border-border/60 pl-2">
+                    <span className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
+                      что изменилось
+                    </span>
+                    {message.changes.map((change, i) => (
+                      <span key={i} className="text-[11px] leading-4 text-muted-foreground">
+                        <span className="font-mono text-foreground/80">{change.path}</span>
+                        {" — "}
+                        {change.why}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {message.trace && message.trace.length > 0 && (
                   <div className="mt-1 flex max-w-[85%] flex-wrap gap-1">
                     {message.trace.map((step, i) => (
@@ -1104,6 +1157,125 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={issuesOpen} onOpenChange={setIssuesOpen}>
+        <DialogContent className="max-h-[80vh] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="size-4" />
+              Что нашёл статический анализ
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {issueCounts.errors} ошибок · {issueCounts.warnings} предупреждений ·{" "}
+              {issueCounts.infos} замечаний. Это не блокер — но такое замечают на ревью.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[52vh] overflow-y-auto">
+            <ul className="flex flex-col divide-y divide-border/60">
+              {issues.map((issue, index) => (
+                <li key={`${issue.id}-${index}`} className="flex flex-col gap-1 py-2.5">
+                  <span className="flex items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "h-4 rounded-full px-1.5 text-[9px] font-normal",
+                        issue.severity === "error"
+                          ? "border-destructive/40 text-destructive"
+                          : issue.severity === "warning"
+                            ? "border-amber-400/40 text-amber-300"
+                            : "text-muted-foreground",
+                      )}
+                    >
+                      {issue.severity}
+                    </Badge>
+                    <span className="text-xs font-medium">{issue.title}</span>
+                    <span className="ml-auto font-mono text-[10px] text-muted-foreground/70">
+                      {issue.path}:{issue.line}
+                    </span>
+                  </span>
+                  <span className="text-[11px] leading-4 text-muted-foreground">
+                    {issue.detail}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setIssuesOpen(false)}>
+              Закрыть
+            </Button>
+            <Button type="button" size="sm" onClick={handleFixIssues}>
+              Пусть агент починит
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
+        <DialogContent className="max-h-[80vh] sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Brain className="size-4" />
+              Память агента
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Эти предпочтения агент вывел из ваших ручных правок в Code panel и
+              теперь соблюдает их по умолчанию.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[52vh] overflow-y-auto">
+            {!patterns || patterns.length === 0 ? (
+              <p className="py-6 text-center text-xs text-muted-foreground/80">
+                Пока ничего не выучено. Отредактируйте файл в Code panel — агент
+                запомнит приём.
+              </p>
+            ) : (
+              <ul className="flex flex-col divide-y divide-border/60">
+                {patterns.map((pattern) => (
+                  <li key={pattern._id} className="flex items-start gap-3 py-2.5">
+                    <span className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="text-xs leading-5">{pattern.statement}</span>
+                      <span className="font-mono text-[10px] text-muted-foreground/60">
+                        {pattern.kind} · наблюдалось {pattern.strength} раз
+                        {pattern.evidence[0] ? ` · например: ${pattern.evidence[0]}` : ""}
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 shrink-0 px-1.5 text-[10px] text-muted-foreground"
+                      onClick={() => void forgetPattern({ patternId: pattern._id })}
+                    >
+                      Забыть
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <DialogFooter>
+            {patterns && patterns.length > 0 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-destructive"
+                onClick={() => {
+                  void clearPatterns({}).then(() =>
+                    toast.success("Память агента очищена"),
+                  );
+                }}
+              >
+                Забыть всё
+              </Button>
+            ) : null}
+            <Button type="button" size="sm" onClick={() => setMemoryOpen(false)}>
+              Готово
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={deployOpen} onOpenChange={setDeployOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -1219,6 +1391,22 @@ export default function Dashboard() {
             >
               v{selectedProject.version}
             </Badge>
+          )}
+          {issueCounts.total > 0 && (
+            <button
+              type="button"
+              onClick={() => setIssuesOpen(true)}
+              className={cn(
+                "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors",
+                issueCounts.errors > 0
+                  ? "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20"
+                  : "border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20",
+              )}
+              title="Что статический анализ нашёл в этом билде"
+            >
+              <AlertTriangle className="size-3" />
+              {issueCounts.total} проблем
+            </button>
           )}
         </div>
         <div className="flex items-center gap-0.5">
@@ -1493,6 +1681,19 @@ export default function Dashboard() {
               </a>
             </Button>
           ) : null}
+          {patterns && patterns.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="hidden h-8 gap-1.5 px-2 text-xs text-muted-foreground sm:inline-flex"
+              onClick={() => setMemoryOpen(true)}
+              title="Что агент выучил из ваших ручных правок"
+            >
+              <Brain className="size-3.5" />
+              {patterns.length}
+            </Button>
+          )}
           <DesktopWorkspaceControls />
           <DesktopStatus />
           {user?.role === "admin" ? (

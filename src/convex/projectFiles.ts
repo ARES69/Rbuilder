@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { getCurrentUser } from "./users";
+import { learnFromDiff } from "./patterns";
 
 async function ownedProject(
   ctx: Parameters<typeof getCurrentUser>[0],
@@ -34,8 +35,13 @@ export const upsert = mutation({
     content: v.string(),
     language: v.optional(v.string()),
     version: v.number(),
+    /**
+     * Set to false by server-side pipelines that write files themselves — a
+     * generated change is not a user preference.
+     */
+    learn: v.optional(v.boolean()),
   },
-  handler: async (ctx, { projectId, path, content, language, version }) => {
+  handler: async (ctx, { projectId, path, content, language, version, learn }) => {
     const project = await ownedProject(ctx, projectId);
     if (!project) throw new Error("Проект не найден");
     const normalizedPath = path.trim().replace(/^\/+/, "");
@@ -50,6 +56,15 @@ export const upsert = mutation({
       .unique();
     const value = { content, language, version };
     if (existing) {
+      // A manual edit teaches the agent how this user wants their code written.
+      if (learn !== false && existing.content !== content) {
+        await learnFromDiff(ctx, {
+          userId: project.userId,
+          path: normalizedPath,
+          before: existing.content,
+          after: content,
+        });
+      }
       await ctx.db.patch(existing._id, value);
       return existing._id;
     }
