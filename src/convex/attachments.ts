@@ -47,7 +47,11 @@ export const getForGeneration = query({
     if (!attachment) return null;
     const project = await ctx.db.get(attachment.projectId);
     if (!project || project.userId !== user._id) return null;
-    return { name: attachment.name, storageId: attachment.storageId ?? null };
+    return {
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      storageId: attachment.storageId ?? null,
+    };
   },
 });
 

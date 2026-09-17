@@ -88,6 +88,49 @@ http.route({
   }),
 });
 
+const NOT_FOUND_PAGE = `<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>404</title>
+<style>body{font-family:ui-sans-serif,system-ui,sans-serif;background:#fafafa;color:#171717;
+min-height:100vh;display:flex;align-items:center;justify-content:center;margin:0;padding:24px}
+div{max-width:420px;text-align:center}h1{font-size:18px;margin:0 0 8px}
+p{font-size:14px;line-height:1.6;color:#737373;margin:0}</style></head>
+<body><div><h1>Такой страницы нет</h1>
+<p>Приложение не опубликовано или ссылка удалена. Опубликуйте проект в RBuilder и повторите.</p>
+</div></body></html>`;
+
+const HTML_HEADERS = {
+  "Content-Type": "text/html; charset=utf-8",
+  // A re-publish must be visible immediately on the same address.
+  "Cache-Control": "public, max-age=0, must-revalidate",
+};
+
+/**
+ * Published apps.
+ * URL format: /p/{slug}  →  https://<deployment>.convex.site/p/{slug}
+ *
+ * This is a real deployment, not a preview: anyone with the link can open it,
+ * and the visit counter behind it is what the dashboard reports.
+ */
+http.route({
+  path: "/p/{slug}",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const slug = decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() ?? "");
+    const deployment = await ctx.runQuery(api.deployments.getBySlug, { slug });
+    if (!deployment) {
+      return new Response(NOT_FOUND_PAGE, { status: 404, headers: HTML_HEADERS });
+    }
+    // Counted before the response so the number reflects real opens.
+    await ctx.runMutation(internal.deployments.recordVisit, {
+      deploymentId: deployment.deploymentId,
+    });
+    return new Response(deployment.html, { status: 200, headers: HTML_HEADERS });
+  }),
+});
+
 /** Minimal GET so users can verify that the webhook URL is reachable. */
 http.route({
   path: "/webhooks/{key}",

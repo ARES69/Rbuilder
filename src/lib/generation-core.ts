@@ -47,6 +47,180 @@ export function extractProjectFiles(raw: string): GeneratedFile[] {
   return [{ path: "index.html", content: extractHtml(raw), language: "html" }];
 }
 
+/* ------------------------------ delta editing ----------------------------- */
+
+/**
+ * Editing an existing project returns *patches*, not whole files.
+ *
+ * Sending a complete manifest back for a one-line change is what made every
+ * iteration cost tens of thousands of tokens, and it is also how a model breaks
+ * code it was never asked to touch. A patch can only change what it names.
+ */
+export interface EditOp {
+  path: string;
+  /** Exact fragment to locate in the file. Must be unique. */
+  find?: string;
+  replace?: string;
+  /** Appended to the end of the file. */
+  append?: string;
+}
+
+export interface EditPlan {
+  edits: EditOp[];
+  newFiles: GeneratedFile[];
+  deleteFiles: string[];
+}
+
+export const EMPTY_EDIT_PLAN: EditPlan = { edits: [], newFiles: [], deleteFiles: [] };
+
+export const EDIT_PROMPT = `You are RBuilder, an expert web app editor. The project already exists — you receive its relevant files. Return ONLY the changes, never the whole project.
+
+STRICT OUTPUT RULES:
+1. Output ONLY valid JSON. No markdown fences, no explanation, no commentary.
+2. Shape: {"edits":[{"path":"src/App.tsx","find":"exact existing fragment","replace":"new fragment"}],"newFiles":[{"path":"src/New.tsx","content":"...","language":"tsx"}],"deleteFiles":["src/old.ts"]}
+3. \`find\` must be copied character-for-character from the provided file and must occur exactly once in it. Include enough surrounding lines to be unique. Never invent or paraphrase it.
+4. Put every brand-new file into \`newFiles\` with its complete content, and use \`append\` instead of \`find\`/\`replace\` when the change adds lines to the end of a file.
+5. Send no edit for code you are not changing. Untouched files must not appear in the answer at all.
+6. Omit empty arrays. Fully implement the requested behaviour — never leave stubs or placeholders.`;
+
+function normalizePath(path: string): string {
+  return path.trim().replace(/^\/+/, "");
+}
+
+function isSafePath(path: string): boolean {
+  return Boolean(path) && !path.includes("..") && !path.startsWith(".");
+}
+
+/** Parse a delta-editing answer. Unparseable output yields an empty plan. */
+export function parseEditResponse(raw: string): EditPlan {
+  const text = raw.trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced ? fenced[1] : text).trim();
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start === -1 || end <= start) return EMPTY_EDIT_PLAN;
+
+  let parsed: { edits?: unknown; newFiles?: unknown; deleteFiles?: unknown };
+  try {
+    parsed = JSON.parse(candidate.slice(start, end + 1));
+  } catch {
+    return EMPTY_EDIT_PLAN;
+  }
+
+  const edits: EditOp[] = Array.isArray(parsed.edits)
+    ? parsed.edits
+        .map((entry): EditOp | null => {
+          if (typeof entry !== "object" || entry === null) return null;
+          const record = entry as Record<string, unknown>;
+          const path = typeof record.path === "string" ? normalizePath(record.path) : "";
+          if (!isSafePath(path)) return null;
+          const find = typeof record.find === "string" ? record.find : undefined;
+          const replace = typeof record.replace === "string" ? record.replace : undefined;
+          const append = typeof record.append === "string" ? record.append : undefined;
+          if (append && !find) return { path, append };
+          if (find && replace !== undefined) return { path, find, replace };
+          return null;
+        })
+        .filter((edit): edit is EditOp => edit !== null)
+        .slice(0, 60)
+    : [];
+
+  const newFiles: GeneratedFile[] = Array.isArray(parsed.newFiles)
+    ? parsed.newFiles
+        .map((entry): GeneratedFile | null => {
+          if (typeof entry !== "object" || entry === null) return null;
+          const record = entry as Record<string, unknown>;
+          const path = typeof record.path === "string" ? normalizePath(record.path) : "";
+          if (!isSafePath(path) || typeof record.content !== "string") return null;
+          return {
+            path,
+            content: record.content,
+            language: typeof record.language === "string" ? record.language : undefined,
+          };
+        })
+        .filter((file): file is GeneratedFile => file !== null)
+        .slice(0, 30)
+    : [];
+
+  const deleteFiles: string[] = Array.isArray(parsed.deleteFiles)
+    ? parsed.deleteFiles
+        .filter((path): path is string => typeof path === "string")
+        .map(normalizePath)
+        .filter(isSafePath)
+        .slice(0, 30)
+    : [];
+
+  return { edits, newFiles, deleteFiles };
+}
+
+export interface AppliedEdits {
+  files: GeneratedFile[];
+  /** Patches that landed, including created files. */
+  applied: number;
+  created: number;
+  /** Human-readable reasons for patches that could not be applied. */
+  failed: string[];
+}
+
+/** Apply a patch plan on top of the current files. Never mutates its input. */
+export function applyEdits(
+  current: GeneratedFile[],
+  plan: EditPlan,
+): AppliedEdits {
+  const byPath = new Map(current.map((file) => [file.path, { ...file }]));
+  const failed: string[] = [];
+  let applied = 0;
+  let created = 0;
+
+  for (const edit of plan.edits) {
+    const file = byPath.get(edit.path);
+    if (!file) {
+      failed.push(`${edit.path}: файла нет в проекте`);
+      continue;
+    }
+    if (edit.append) {
+      file.content = `${file.content.replace(/\s*$/, "")}\n${edit.append.trim()}\n`;
+      applied += 1;
+      continue;
+    }
+    const find = edit.find ?? "";
+    if (!find || edit.replace === undefined) {
+      failed.push(`${edit.path}: пустой find`);
+      continue;
+    }
+    const index = file.content.indexOf(find);
+    if (index === -1) {
+      failed.push(`${edit.path}: фрагмент не найден дословно`);
+      continue;
+    }
+    file.content =
+      file.content.slice(0, index) + edit.replace + file.content.slice(index + find.length);
+    applied += 1;
+  }
+
+  for (const file of plan.newFiles) {
+    byPath.set(file.path, { ...file });
+    created += 1;
+  }
+
+  for (const path of plan.deleteFiles) {
+    byPath.delete(path);
+  }
+
+  const files = Array.from(byPath.values()).sort((a, b) => {
+    if (a.path === "index.html") return -1;
+    if (b.path === "index.html") return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  return { files, applied: applied + created, created, failed };
+}
+
+/** Whether a plan actually changes anything. */
+export function hasEditWork(plan: EditPlan): boolean {
+  return plan.edits.length > 0 || plan.newFiles.length > 0 || plan.deleteFiles.length > 0;
+}
+
 /* --------------------------------- review --------------------------------- */
 
 export interface ReviewResult {

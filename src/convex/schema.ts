@@ -159,6 +159,23 @@ const schema = defineSchema(
       .index("by_user", ["userId"])
       .index("by_user_created", ["userId", "createdAt"]),
 
+    // Published apps. A deployment is the shareable artefact of a project:
+    // a stable slug served over HTTP, plus its visit count.
+    deployments: defineTable({
+      projectId: v.id("projects"),
+      userId: v.id("users"),
+      slug: v.string(),
+      title: v.string(),
+      /** Project version that is currently live. */
+      version: v.number(),
+      visits: v.number(),
+      publishedAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_slug", ["slug"])
+      .index("by_project", ["projectId"]),
+
     // daily build sessions for session-based models (6/day, Freebuff-style)
     sessions: defineTable({
       userId: v.id("users"),

@@ -11,6 +11,13 @@ import { ModelPicker, useSessionStatus } from "@/components/model-picker";
 import { getModel, DAILY_SESSION_LIMIT } from "@/lib/models";
 import { ARCHITECTURES, DEFAULT_ARCHITECTURE_ID } from "@/lib/architecture";
 import { SNIPPETS, SNIPPET_CATEGORIES } from "@/lib/snippets";
+import {
+  collectElementContext,
+  formatElementContext,
+  pickedElementPrompt,
+  type PreviewElementContext,
+} from "@/lib/element-context";
+import { publishUrl, shortHost } from "@/lib/deploy";
 import { PROMPT_PRESETS } from "@/lib/prompt-presets";
 import { WorkspaceTabs, type WorkspaceTab } from "@/components/workspace-tabs";
 import {
@@ -31,6 +38,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -64,6 +73,7 @@ import {
   ExternalLink,
   Layers3,
   FileText,
+  Link2,
   Loader2,
   LogOut,
   Monitor,
@@ -95,11 +105,20 @@ function PanelEmpty({ text }: { text: string }) {
   );
 }
 
+const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string | undefined;
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+const publishedFormat = new Intl.DateTimeFormat("ru-RU", {
+  day: "2-digit",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
 export default function Dashboard() {
   const { user, signOut, isLoading: authLoading } = useAuth();
@@ -127,6 +146,9 @@ export default function Dashboard() {
   const [previewKey, setPreviewKey] = useState(0);
   const [mobileTab, setMobileTab] = useState<"chat" | "preview">("chat");
   const [pendingModel, setPendingModel] = useState<string | undefined>(undefined);
+  const [deployOpen, setDeployOpen] = useState(false);
+  const [deploying, setDeploying] = useState(false);
+  const [slugInput, setSlugInput] = useState("");
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("code");
   const [sidebarSection, setSidebarSection] = useState<SidebarSection>("chat");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -136,11 +158,8 @@ export default function Dashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const [selectingPreviewElement, setSelectingPreviewElement] = useState(false);
-  const [selectedPreviewElement, setSelectedPreviewElement] = useState<{
-    selector: string;
-    tag: string;
-    text: string;
-  } | null>(null);
+  const [selectedPreviewElement, setSelectedPreviewElement] =
+    useState<PreviewElementContext | null>(null);
 
   // Effective selection: the explicit pick when set, otherwise the most
   // recent project. Derived during render — no state-sync effect needed.
@@ -164,6 +183,7 @@ export default function Dashboard() {
     effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : "skip",
   );
   const usage = useQuery(api.usage.summary, {});
+  const deployments = useQuery(api.deployments.mine, {});
   // The most recent run doubles as the live progress feed: the pipeline
   // appends each finished stage and sets `step` while a stage is in flight.
   const liveRun = agentRuns?.[0] ?? null;
@@ -172,6 +192,25 @@ export default function Dashboard() {
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages?.length, generating]);
+
+  /**
+   * Stage a picture of the picked element as an attachment.
+   * Best-effort: the structured DOM context is what the agent actually needs,
+   * so a failed snapshot must never block the interaction.
+   */
+  const stageElementScreenshot = async (element: HTMLElement) => {
+    try {
+      const { snapdom } = await import("@zumer/snapdom");
+      const canvas = await snapdom.toCanvas(element, { fast: true });
+      const blob = await (await fetch(canvas.toDataURL("image/png"))).blob();
+      const file = new File([blob], `preview-element-${Date.now()}.png`, {
+        type: "image/png",
+      });
+      setStagedFiles((prev) => [...prev, { id: `shot-${Date.now()}`, file }]);
+    } catch {
+      // Ignored on purpose (see above).
+    }
+  };
 
   // Attach the element picker to every rendered preview iframe. srcDoc keeps
   // the document same-origin, so we can inspect it without adding runtime code
@@ -240,12 +279,17 @@ export default function Dashboard() {
         event.stopPropagation();
         clearHover();
         target.setAttribute("data-rbuilder-picker-selected", "true");
-        const text = (target.innerText || target.textContent || "").trim().replace(/\\s+/g, " ").slice(0, 160);
-        const selection = { selector: selectorFor(target), tag: target.tagName.toLowerCase(), text };
+        // Collect the full picture — selector, applied CSS, computed styles,
+        // neighbours — so the agent knows exactly what it is changing.
+        const selection = collectElementContext(target, selectorFor(target), doc);
         setSelectedPreviewElement(selection);
-        setInput((current) => `${current.trim()}${current.trim() ? "\\n\\n" : ""}Измени выбранный элемент: ${selection.selector}${selection.text ? ` (${selection.text})` : ""}`);
+        const picked = pickedElementPrompt(selection);
+        setInput((current) => `${current.trim()}${current.trim() ? "\n\n" : ""}${picked}`);
         setSelectingPreviewElement(false);
         toast.success(`Выбран элемент ${selection.selector}`);
+        // A picture of the element is staged as an attachment, so the model can
+        // compare what the user sees with what the DOM reports.
+        void stageElementScreenshot(target);
       };
       doc.addEventListener("mousemove", onMove, true);
       doc.addEventListener("click", onClick, true);
@@ -288,6 +332,8 @@ export default function Dashboard() {
   const startAgentRun = useMutation(api.workspaces.startRun);
   const finishAgentRun = useMutation(api.workspaces.finishRun);
   const setModelMutation = useMutation(api.projects.setModel);
+  const publishDeployment = useMutation(api.deployments.publish);
+  const unpublishDeployment = useMutation(api.deployments.unpublish);
 
   const activeModel = getModel(selectedProject?.model ?? pendingModel);
 
@@ -360,9 +406,16 @@ export default function Dashboard() {
   const handleSend = async () => {
     const content = input.trim();
     if (!content || generating || authLoading) return;
-    const request = approvedPlan
-      ? `${content}\n\nУТВЕРЖДЁННЫЙ ПЛАН ПРОЕКТА:\n${approvedPlan}`
-      : content;
+    // The picked preview element travels as a structured block: selector, the
+    // CSS rules that actually apply, computed styles and neighbours.
+    const request = [
+      approvedPlan
+        ? `${content}\n\nУТВЕРЖДЁННЫЙ ПЛАН ПРОЕКТА:\n${approvedPlan}`
+        : content,
+      selectedPreviewElement ? formatElementContext(selectedPreviewElement) : null,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     const model = getModel(selectedProject?.model ?? pendingModel);
     const remaining = session ? session.limit - session.used : null;
@@ -475,6 +528,7 @@ export default function Dashboard() {
         await finishAgentRun({ runId, status: "completed", trace: result.trace });
       }
       setApprovedPlan(null);
+      setSelectedPreviewElement(null);
       setPreviewKey((k) => k + 1);
       if (result.demo) {
         toast.info(result.notice ?? "Ключ выбранной модели не настроен");
@@ -521,11 +575,58 @@ export default function Dashboard() {
     return true;
   };
 
-  const handleDeploy = () => {
-    if (openPreviewInTab()) {
-      toast.info("Preview открыт. Production deploy подключается через Desktop/CI runtime.");
-    } else {
-      toast.info("Сначала создайте приложение — после сборки его можно будет открыть в preview.");
+  // The live URL of the current project, if it has been published.
+  const deployment = useMemo(
+    () => deployments?.find((row) => row.projectId === effectiveProjectId) ?? null,
+    [deployments, effectiveProjectId],
+  );
+  const liveUrl = deployment ? publishUrl(deployment.slug, CONVEX_URL) : null;
+
+  /**
+   * Publish the current build behind a real, shareable URL.
+   * Re-publishing updates the same address, so a link already sent to someone
+   * keeps working and shows the newer version.
+   */
+  const handleDeploy = async () => {
+    if (!effectiveProjectId || !selectedProject?.html) {
+      toast.info("Сначала соберите приложение — после сборки его можно опубликовать.");
+      return;
+    }
+    setDeploying(true);
+    try {
+      const result = await publishDeployment({
+        projectId: effectiveProjectId,
+        slug: slugInput.trim() ? slugInput.trim().toLowerCase() : undefined,
+        title: selectedProject.name,
+      });
+      const url = publishUrl(result.slug, CONVEX_URL);
+      setSlugInput(result.slug);
+      setDeployOpen(true);
+      try {
+        await navigator.clipboard?.writeText(url);
+        toast.success("Опубликовано — ссылка скопирована");
+      } catch {
+        toast.success("Опубликовано");
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Не удалось опубликовать проект.",
+      );
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  const handleUnpublish = async () => {
+    if (!deployment) return;
+    try {
+      await unpublishDeployment({ deploymentId: deployment._id });
+      setDeployOpen(false);
+      toast.success("Публикация остановлена");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Не удалось остановить публикацию.",
+      );
     }
   };
 
@@ -1002,6 +1103,105 @@ export default function Dashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={deployOpen} onOpenChange={setDeployOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Rocket className="size-4" />
+              Публикация
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Приложение доступно по настоящей ссылке — её можно отправить кому угодно.
+              Повторная публикация обновляет ту же ссылку.
+            </DialogDescription>
+          </DialogHeader>
+
+          {liveUrl ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/30 px-2.5 py-2">
+                <Link2 className="size-3.5 shrink-0 text-muted-foreground" />
+                <a
+                  href={liveUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 flex-1 truncate font-mono text-xs hover:underline"
+                >
+                  {liveUrl}
+                </a>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                <span>{deployment?.visits ?? 0} просмотров</span>
+                <span>версия v{deployment?.version ?? 0}</span>
+                {deployment ? (
+                  <span>
+                    обновлено {publishedFormat.format(new Date(deployment.updatedAt))}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="deploy-slug" className="text-[11px] text-muted-foreground">
+                  Адрес
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="deploy-slug"
+                    value={slugInput}
+                    onChange={(event) => setSlugInput(event.target.value)}
+                    placeholder="my-app"
+                    className="h-8 font-mono text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8"
+                    disabled={deploying}
+                    onClick={() => void handleDeploy()}
+                  >
+                    {deploying ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      "Опубликовать"
+                    )}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground/70">
+                  Только латиница, цифры и дефис. Если адрес занят, будет подобран свободный.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs leading-5 text-muted-foreground">
+              Соберите приложение и нажмите Deploy — появится ссылка вида{" "}
+              {shortHost(publishUrl("my-app", CONVEX_URL))}.
+            </p>
+          )}
+
+          <DialogFooter>
+            {liveUrl ? (
+              <Button asChild type="button" variant="ghost" size="sm">
+                <a href={liveUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink className="size-3.5" /> Открыть
+                </a>
+              </Button>
+            ) : null}
+            {deployment ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-destructive"
+                onClick={() => void handleUnpublish()}
+              >
+                Остановить публикацию
+              </Button>
+            ) : null}
+            <Button type="button" size="sm" onClick={() => setDeployOpen(false)}>
+              Готово
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 
@@ -1265,11 +1465,34 @@ export default function Dashboard() {
             variant="default"
             size="sm"
             className="hidden h-8 gap-1.5 bg-blue-600 px-3 text-xs text-white shadow-[0_0_18px_rgba(37,99,235,0.25)] hover:bg-blue-500 sm:inline-flex"
-            onClick={handleDeploy}
-            disabled={!selectedProject?.html}
+            onClick={() => void handleDeploy()}
+            disabled={!selectedProject?.html || deploying}
           >
-            <Rocket className="size-3.5" /> Deploy
+            {deploying ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Rocket className="size-3.5" />
+            )}
+            {deployment ? "Обновить" : "Deploy"}
           </Button>
+          {liveUrl ? (
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="hidden h-8 gap-1.5 px-2 text-xs text-emerald-300 lg:inline-flex"
+            >
+              <a
+                href={liveUrl}
+                target="_blank"
+                rel="noreferrer"
+                title="Опубликованная версия и число просмотров"
+              >
+                <span className="size-1.5 rounded-full bg-emerald-400" />
+                live · {deployment?.visits ?? 0}
+              </a>
+            </Button>
+          ) : null}
           <DesktopWorkspaceControls />
           <DesktopStatus />
           {user?.role === "admin" ? (

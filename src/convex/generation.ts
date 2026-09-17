@@ -10,11 +10,14 @@ import {
 } from "../lib/providers";
 import {
   DAY_MS,
+  EDIT_PROMPT,
   HOUR_MS,
   MAX_REVIEW_ROUNDS,
   REVIEW_PROMPT,
+  applyEdits,
   describeModelError,
-  extractHtml,
+  hasEditWork,
+  parseEditResponse,
   extractProjectFiles,
   formatProjectContext,
   isRetryableStatus,
@@ -134,20 +137,22 @@ async function callModel(
   maxTokens: number,
   options?: { json?: boolean },
 ): Promise<{ text: string; usage: Usage }> {
-  const body = JSON.stringify({
-    model: apiModel,
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-    temperature: 0.4,
-    max_tokens: maxTokens,
-    ...(options?.json ? { response_format: { type: "json_object" } } : {}),
-  });
-
   let lastError: Error | null = null;
   const attempts = 2;
+  // `response_format` is not supported by every OpenAI-compatible gateway, so
+  // it is dropped and the request repeated rather than failing the build.
+  let useJson = Boolean(options?.json);
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const body = JSON.stringify({
+      model: apiModel,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0.4,
+      max_tokens: maxTokens,
+      ...(useJson ? { response_format: { type: "json_object" } } : {}),
+    });
     let response: Response;
     try {
       response = await fetch(target.chatUrl, {
@@ -168,6 +173,10 @@ async function callModel(
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
+      if (useJson && (response.status === 400 || response.status === 422)) {
+        useJson = false;
+        continue;
+      }
       const message = describeModelError(
         response.status,
         target.providerLabel,
@@ -331,13 +340,8 @@ export const run = action({
      * we retry without it and let the parser handle prose, instead of failing
      * a whole build over an optional parameter.
      */
-    const callReview = async (user: string) => {
-      try {
-        return await call(REVIEW_PROMPT, user, 600, { json: true });
-      } catch {
-        return await call(REVIEW_PROMPT, user, 600);
-      }
-    };
+    const callReview = (user: string) =>
+      call(REVIEW_PROMPT, user, 600, { json: true });
 
     // Enabled skills are appended to the builder instructions
     const skillsBlock =
@@ -364,7 +368,12 @@ export const run = action({
           attachmentId: id,
         });
         if (!meta) continue;
-        if (meta.storageId) {
+        // Only text-shaped attachments are inlined. Dumping a PNG through
+        // `blob.text()` would paste binary noise into the prompt.
+        const isText =
+          meta.mimeType.startsWith("text/") ||
+          /(json|javascript|typescript|xml|svg|csv|yaml|markdown|sql)/.test(meta.mimeType);
+        if (meta.storageId && isText) {
           const blob = await ctx.storage.get(meta.storageId);
           if (blob) {
             attachmentContext.push(
@@ -372,7 +381,9 @@ export const run = action({
             );
           }
         } else {
-          attachmentContext.push(`--- ${meta.name} (attached) ---`);
+          attachmentContext.push(
+            `--- ${meta.name} (${meta.mimeType}, прикреплён без чтения содержимого) ---`,
+          );
         }
       }
     }
@@ -507,9 +518,47 @@ export const run = action({
       trace.push({ agent: "planner", note: "пропущен (thinker выключен)", ms: 0 });
     }
 
+    /**
+     * Produce project files from a prompt.
+     *
+     * With an existing project the model returns patches and we apply them, so
+     * an edit costs a fraction of a rebuild and a file it does not name can not
+     * be damaged. If the patch does not land we fall back to a full rebuild
+     * once — correctness first, cost second.
+     */
+    const produceFiles = async (
+      input: string,
+      editable: GeneratedFile[],
+    ): Promise<{ files: GeneratedFile[]; note: string }> => {
+      const system = `${contract}${skillsBlock}${toolsBlock}`;
+      if (editable.length > 0) {
+        const editRaw = await call(`${EDIT_PROMPT}\n\n${system}`, input, 16000, {
+          json: true,
+        });
+        const plan = parseEditResponse(editRaw);
+        if (hasEditWork(plan)) {
+          const result = applyEdits(editable, plan);
+          if (result.applied > 0) {
+            return {
+              files: result.files,
+              note:
+                result.failed.length > 0
+                  ? `правки: ${result.applied} применено, ${result.failed.length} не легло`
+                  : `правки: ${result.applied} применено`,
+            };
+          }
+        }
+      }
+      const raw = await call(`${BUILD_PROMPT}\n\n${system}`, input, 16000);
+      return {
+        files: extractProjectFiles(raw),
+        note: editable.length > 0 ? "полная пересборка" : "проект собран",
+      };
+    };
+
     // Stage 3 — builder agent
     startedAt = Date.now();
-    await begin("builder", "пишу код");
+    await begin("builder", currentFiles.length ? "правлю код" : "пишу код");
     const buildInput = [
       attachmentContext.length
         ? `Attached files:\n${attachmentContext.join("\n\n")}`
@@ -526,24 +575,15 @@ export const run = action({
     ]
       .filter(Boolean)
       .join("\n\n");
-    const raw = await call(
-      `${BUILD_PROMPT}\n\n${contract}${skillsBlock}${toolsBlock}`,
-      buildInput,
-      16000,
-    );
-    let files = extractProjectFiles(raw);
-    let html = files.find((file) => file.path === "index.html")?.content ?? extractHtml(raw);
+    const built = await produceFiles(buildInput, currentFiles);
+    let files = built.files
+      .map((file) => ({ ...file, path: file.path.trim().replace(/^\/+/, "") }))
+      .filter((file) => file.path && !file.path.includes(".."));
+    let html = files.find((file) => file.path === "index.html")?.content ?? "";
     if (!html) {
       throw new Error("Модель вернула пустой ответ. Попробуйте ещё раз.");
     }
-    files = files
-      .map((file) => ({ ...file, path: file.path.trim().replace(/^\/+/, "") }))
-      .filter((file) => file.path && !file.path.includes(".."));
-    await end(
-      "builder",
-      `${currentFiles.length ? "обновил" : "создал"} проект (${html.length} символов)`,
-      startedAt,
-    );
+    await end("builder", `${built.note} (${html.length} символов)`, startedAt);
 
     // Stage 4 — reviewer agent: review, repair, re-review (bounded).
     if (!useReviewer) {
@@ -562,23 +602,18 @@ export const run = action({
       for (let round = 0; round < MAX_REVIEW_ROUNDS && review.verdict === "fix"; round += 1) {
         await begin("reviewer", `правлю замечания (${round + 1}/${MAX_REVIEW_ROUNDS})`);
         const fixInput = [
-          `Current project files:\n${truncate(html, MAX_CONTEXT_CHARS)}`,
+          `Current project files:\n${formatProjectContext(
+            selectRelevantFiles(files, review.issues.join(" "), MAX_CONTEXT_CHARS),
+          )}`,
           `Reviewer issues (fix every one):\n${review.issues.map((issue) => `- ${issue}`).join("\n")}`,
           `Original request:\n${prompt}`,
-          "Return the complete corrected project as the same JSON file manifest.",
         ].join("\n\n");
-        const repaired = await call(
-          `${BUILD_PROMPT}\n\n${contract}${skillsBlock}${toolsBlock}`,
-          fixInput,
-          16000,
-        );
-        const repairedFiles = extractProjectFiles(repaired);
+        const repaired = await produceFiles(fixInput, files);
         const repairedHtml =
-          repairedFiles.find((file) => file.path === "index.html")?.content ??
-          extractHtml(repaired);
-        if (repairedHtml) {
+          repaired.files.find((file) => file.path === "index.html")?.content ?? "";
+        if (repairedHtml && repairedHtml !== html) {
           html = repairedHtml;
-          files = repairedFiles;
+          files = repaired.files;
         } else {
           break;
         }

@@ -11,7 +11,10 @@ import {
   HOUR_MS,
   MAX_REVIEW_ROUNDS,
   RATE_LIMITS,
+  applyEdits,
   countWithinWindow,
+  hasEditWork,
+  parseEditResponse,
   describeModelError,
   extractHtml,
   extractProjectFiles,
@@ -21,6 +24,8 @@ import {
   selectRelevantFiles,
   truncate,
 } from "./generation-core";
+import { describeElement, formatElementContext, pickedElementPrompt } from "./element-context";
+import { isValidSlug, publishUrl, shortHost, siteBaseUrl, slugify } from "./deploy";
 import { BUILT_IN_SKILLS, parseCustomSkill, SKILL_CATEGORIES } from "./skills";
 import { STARTER_TEMPLATES } from "./templates";
 import { CAPABILITIES } from "./capabilities";
@@ -702,6 +707,81 @@ describe("generation core", () => {
     expect(text).toContain("--- index.html ---");
   });
 
+  test("delta editing changes only the named fragment", () => {
+    const current = [
+      { path: "index.html", content: "<h1>Hello</h1>\n<footer>keep me</footer>" },
+      { path: "src/other.ts", content: "export const untouched = true;" },
+    ];
+    const plan = parseEditResponse(
+      JSON.stringify({
+        edits: [{ path: "index.html", find: "<h1>Hello</h1>", replace: "<h1>Привет</h1>" }],
+      }),
+    );
+    const result = applyEdits(current, plan);
+    expect(result.applied).toBe(1);
+    expect(result.failed).toEqual([]);
+    const html = result.files.find((file) => file.path === "index.html")?.content ?? "";
+    expect(html).toContain("<h1>Привет</h1>");
+    expect(html).toContain("<footer>keep me</footer>");
+    // The surviving file is byte-identical — the model cannot break what it
+    // did not name.
+    expect(result.files.find((f) => f.path === "src/other.ts")?.content).toBe(
+      "export const untouched = true;",
+    );
+    // Input files are never mutated in place.
+    expect(current[0].content).toContain("<h1>Hello</h1>");
+  });
+
+  test("append, new files and deletions are applied", () => {
+    const current = [{ path: "index.html", content: "<html></html>" }];
+    const plan = parseEditResponse(
+      JSON.stringify({
+        edits: [{ path: "index.html", append: "<script>ok()</script>" }],
+        newFiles: [{ path: "src/New.tsx", content: "export default 1;" }],
+        deleteFiles: ["src/gone.ts"],
+      }),
+    );
+    const result = applyEdits(
+      [...current, { path: "src/gone.ts", content: "obsolete" }],
+      plan,
+    );
+    expect(hasEditWork(plan)).toBe(true);
+    expect(result.created).toBe(1);
+    expect(result.files.map((f) => f.path)).toEqual(["index.html", "src/New.tsx"]);
+    expect(result.files[0].content).toContain("ok()");
+  });
+
+  test("a patch that does not match is reported, not silently dropped", () => {
+    const plan = parseEditResponse(
+      JSON.stringify({
+        edits: [{ path: "index.html", find: "<h1>Not there</h1>", replace: "x" }],
+      }),
+    );
+    const result = applyEdits([{ path: "index.html", content: "<h1>Hi</h1>" }], plan);
+    expect(result.applied).toBe(0);
+    expect(result.failed.length).toBe(1);
+  });
+
+  test("hostile or malformed patches are rejected", () => {
+    const plan = parseEditResponse(
+      JSON.stringify({
+        edits: [
+          { path: "../../etc/passwd", find: "a", replace: "b" },
+          { path: "index.html" },
+          "not an object",
+        ],
+        newFiles: [{ path: "../evil.ts", content: "x" }],
+      }),
+    );
+    expect(plan.edits).toEqual([]);
+    expect(plan.newFiles).toEqual([]);
+  });
+
+  test("a non-patch answer yields an empty plan so the caller can rebuild", () => {
+    expect(hasEditWork(parseEditResponse("Sure! Here is the code..."))).toBe(false);
+    expect(hasEditWork(parseEditResponse("```json\n{ broken\n```"))).toBe(false);
+  });
+
   test("rate limits count calls inside the rolling window", () => {
     const now = 1_000_000_000;
     const records = [
@@ -710,5 +790,78 @@ describe("generation core", () => {
     ];
     expect(countWithinWindow(records, HOUR_MS, now)).toBe(1);
     expect(RATE_LIMITS.anonymousPerDay).toBeLessThan(RATE_LIMITS.perUserPerDay);
+  });
+});
+
+/* ------------------------------- deployments ------------------------------ */
+
+describe("deployment urls", () => {
+  test("slugs are latin, lowercase and shareable", () => {
+    expect(slugify("Мой магазин туров")).toBe("moy-magazin-turov");
+    expect(slugify("Sales Dashboard!!")).toBe("sales-dashboard");
+    expect(slugify("  ---  ")).toBe("rbuilder-app");
+    expect(slugify("a")).toBe("rbuilder-app");
+  });
+
+  test("slug validation rejects unsafe addresses", () => {
+    expect(isValidSlug("my-app")).toBe(true);
+    expect(isValidSlug("-bad")).toBe(false);
+    expect(isValidSlug("bad-")).toBe(false);
+    expect(isValidSlug("UpperCase")).toBe(false);
+    expect(isValidSlug("no_slashes/")).toBe(false);
+    expect(isValidSlug("ab")).toBe(false);
+  });
+
+  test("publish url points at the deployment's http endpoint", () => {
+    const convexUrl = "https://deceptive-corgi-225.convex.cloud";
+    expect(siteBaseUrl(convexUrl)).toBe("https://deceptive-corgi-225.convex.site");
+    expect(publishUrl("my-app", convexUrl)).toBe(
+      "https://deceptive-corgi-225.convex.site/p/my-app",
+    );
+    expect(siteBaseUrl(undefined)).toBe("");
+  });
+
+  test("host label is readable in the toolbar", () => {
+    expect(shortHost("https://app.convex.site/p/demo")).toBe("app.convex.site");
+    expect(shortHost("/p/demo")).toBe("/p/demo");
+  });
+});
+
+/* ----------------------------- element picker ----------------------------- */
+
+describe("element context", () => {
+  const context = {
+    selector: "main > section.hero > button.primary",
+    tag: "button",
+    id: "cta",
+    classes: ["primary", "lg"],
+    text: "Найти туры",
+    attributes: { "data-id": "tour-search", "aria-label": "Поиск" },
+    computed: { display: "inline-flex", "background-color": "rgb(17, 17, 17)" },
+    cssRules: [".primary { background: #111 }", "@media (max-width: 640px) { ... }"],
+    parent: "section.hero",
+    siblings: ['a.link «Туры»', 'button.ghost «Сброс»'],
+  };
+
+  test("the prompt block carries selector, css and neighbours", () => {
+    const formatted = formatElementContext(context);
+    expect(formatted).toContain("main > section.hero > button.primary");
+    expect(formatted).toContain("background-color: rgb(17, 17, 17)");
+    expect(formatted).toContain(".primary { background: #111 }");
+    expect(formatted).toContain("section.hero");
+    expect(formatted).toContain("Туры");
+    expect(formatted).toContain("не трогай");
+  });
+
+  test("element labels stay short", () => {
+    expect(describeElement({ tag: "button", classes: ["primary"], text: "Войти" })).toBe(
+      "button.primary «Войти»",
+    );
+    expect(describeElement({ tag: "div", classes: [], text: "" })).toBe("div");
+  });
+
+  test("composer text names the element", () => {
+    expect(pickedElementPrompt(context)).toContain("main > section.hero > button.primary");
+    expect(pickedElementPrompt(context)).toContain("Найти туры");
   });
 });
