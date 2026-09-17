@@ -163,6 +163,10 @@ export default function Dashboard() {
     api.workspaces.runs,
     effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : "skip",
   );
+  const usage = useQuery(api.usage.summary, {});
+  // The most recent run doubles as the live progress feed: the pipeline
+  // appends each finished stage and sets `step` while a stage is in flight.
+  const liveRun = agentRuns?.[0] ?? null;
 
   // Keep chat scrolled to the latest message.
   useEffect(() => {
@@ -441,6 +445,8 @@ export default function Dashboard() {
         prompt: request,
         modelId: model.id,
         architectureId,
+        projectId,
+        runId: runId ?? undefined,
         previousHtml: previous?.html ?? undefined,
         attachmentIds: attachmentIds.length ? attachmentIds : undefined,
         skillPrompts:
@@ -470,7 +476,17 @@ export default function Dashboard() {
       }
       setApprovedPlan(null);
       setPreviewKey((k) => k + 1);
-      toast.success(result.demo ? "Демо-режим: добавьте ключ модели" : "Сборка завершена");
+      if (result.demo) {
+        toast.info(result.notice ?? "Ключ выбранной модели не настроен");
+      } else {
+        const tokens = result.usage.promptTokens + result.usage.completionTokens;
+        const cost = result.usage.costRub;
+        toast.success(
+          cost
+            ? `Сборка завершена · ${tokens.toLocaleString("ru-RU")} токенов · ≈${cost.toFixed(2)} ₽`
+            : `Сборка завершена · ${tokens.toLocaleString("ru-RU")} токенов`,
+        );
+      }
     } catch (error) {
       if (runId) {
         await finishAgentRun({
@@ -590,11 +606,33 @@ export default function Dashboard() {
             ))
           )}
 
-          {generating && (
-            <div className="flex items-center gap-2 pt-1 text-sm text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
-              {activeModel.name} pipeline: context → planner → builder →
-              reviewer…
+          {(generating || liveRun?.status === "running") && (
+            <div className="rounded-lg border border-border/70 bg-muted/30 p-2.5">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                <span className="truncate">
+                  {liveRun?.step ?? `${activeModel.name}: запускаю пайплайн`}
+                </span>
+              </div>
+              {(liveRun?.trace?.length ?? 0) > 0 && (
+                <ol className="mt-2 space-y-1">
+                  {liveRun?.trace?.map((entry, i) => (
+                    <li key={i} className="flex items-baseline gap-2 text-[11px]">
+                      <span className="w-20 shrink-0 truncate text-muted-foreground/70">
+                        {entry.agent}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                        {entry.note}
+                      </span>
+                      {entry.ms > 0 && (
+                        <span className="tabular-nums text-muted-foreground/60">
+                          {(entry.ms / 1000).toFixed(1)}s
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
           )}
           <div ref={chatBottomRef} />
@@ -1202,6 +1240,15 @@ export default function Dashboard() {
           {session && (
             <span className="hidden text-xs text-muted-foreground/70 sm:block">
               {session.used}/{session.limit} сессий сегодня
+            </span>
+          )}
+          {usage && usage.todayCount > 0 && (
+            <span
+              className="hidden text-xs text-muted-foreground/70 xl:block"
+              title="Токены и оценка стоимости за сегодня"
+            >
+              {usage.todayTokens.toLocaleString("ru-RU")} токенов
+              {usage.todayCostRub > 0 && ` · ≈${usage.todayCostRub.toFixed(2)} ₽`}
             </span>
           )}
           {agentRuns?.[0] ? (

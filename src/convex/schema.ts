@@ -74,6 +74,8 @@ const schema = defineSchema(
           }),
         ),
       ),
+      /** Stage currently in flight, so the UI can stream progress. */
+      step: v.optional(v.string()),
       error: v.optional(v.string()),
     })
       .index("by_user", ["userId"])
@@ -138,6 +140,24 @@ const schema = defineSchema(
       size: v.number(),
       storageId: v.optional(v.id("_storage")),
     }).index("by_project", ["projectId"]),
+
+    // One row per model call: what it cost, who spent it and on what project.
+    // Without this the only place a bill shows up is the provider dashboard.
+    apiUsage: defineTable({
+      userId: v.id("users"),
+      projectId: v.optional(v.id("projects")),
+      provider: v.string(),
+      apiModel: v.string(),
+      promptTokens: v.number(),
+      completionTokens: v.number(),
+      /** null when the provider price is unknown — tokens are still recorded. */
+      costRub: v.union(v.number(), v.null()),
+      /** Whether the call belonged to an auto-created guest account. */
+      anonymous: v.boolean(),
+      createdAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_user_created", ["userId", "createdAt"]),
 
     // daily build sessions for session-based models (6/day, Freebuff-style)
     sessions: defineTable({

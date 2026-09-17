@@ -1,4 +1,4 @@
-import { MODELS, getModel, DAILY_SESSION_LIMIT } from "@/lib/models";
+import { MODELS, getModel, getProvider, DAILY_SESSION_LIMIT } from "@/lib/models";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import {
@@ -123,9 +123,10 @@ export function ModelPicker({
                   {model.bestFor}
                 </span>
                 <span className="text-[11px] text-muted-foreground/60">
-                  {model.context}
-                  {model.id === "muse-spark-1.2" &&
-                    " · queues when busy, answers on DeepSeek V4 Flash"}
+                  {getProvider(model.provider).label} · {model.context}
+                </span>
+                <span className="font-mono text-[10px] text-muted-foreground/50">
+                  api: {model.apiModel}
                 </span>
                 {model.dataNotice ? (
                   <span className="text-[10px] text-muted-foreground/50">

@@ -4,11 +4,13 @@ import { internal } from "../_generated/api";
 import type { DataModel, Id } from "../_generated/dataModel";
 
 /**
- * Admin sign-in with a username and password (defaults: `admin` / `admin`).
+ * Admin sign-in with a username and password.
  *
- * Override the defaults by setting `ADMIN_USERNAME` / `ADMIN_PASSWORD` in the
- * project's Keys tab — do that before sharing the deployment publicly, since
- * the shipped defaults are intentionally easy to guess.
+ * Fail-closed by design: there are **no default credentials**. Sign-in only
+ * works when `ADMIN_PASSWORD` is set in the deployment's environment, so a
+ * freshly deployed instance cannot be entered with a shipped `admin`/`admin`.
+ * Set `ADMIN_USERNAME` (defaults to `admin`) and `ADMIN_PASSWORD` before you
+ * need the console.
  *
  * `authorize` runs in an action context (no direct database access), so the
  * user row is provisioned by `internal.adminUsers.ensureAdmin`. Convex Auth
@@ -16,7 +18,17 @@ import type { DataModel, Id } from "../_generated/dataModel";
  */
 
 const DEFAULT_USERNAME = "admin";
-const DEFAULT_PASSWORD = "admin";
+const MIN_PASSWORD_LENGTH = 12;
+
+/** Constant-ish comparison so a wrong password does not short-circuit. */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
 
 // The explicit annotations below break the type cycle
 // adminCredentials → _generated/api → auth.ts → adminCredentials, which
@@ -33,15 +45,25 @@ export const adminCredentials: ConvexCredentialsConfig =
         .toLowerCase();
       const password = String(credentials.password ?? "");
 
-      const expectedUsername = (
-        process.env.ADMIN_USERNAME ?? DEFAULT_USERNAME
-      ).toLowerCase();
-      const expectedPassword = process.env.ADMIN_PASSWORD ?? DEFAULT_PASSWORD;
+      const configured = process.env.ADMIN_PASSWORD ?? "";
+      if (configured.length < MIN_PASSWORD_LENGTH) {
+        throw new Error(
+          "Админ-вход отключён: задайте ADMIN_PASSWORD (не короче 12 символов) в переменных окружения Convex.",
+        );
+      }
 
       if (!username || !password) {
         throw new Error("Введите логин и пароль");
       }
-      if (username !== expectedUsername || password !== expectedPassword) {
+
+      const expectedUsername = (
+        process.env.ADMIN_USERNAME ?? DEFAULT_USERNAME
+      ).toLowerCase();
+
+      if (
+        username !== expectedUsername ||
+        !safeEqual(password, configured)
+      ) {
         throw new Error("Неверный логин или пароль");
       }
 

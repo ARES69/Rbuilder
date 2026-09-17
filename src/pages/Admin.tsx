@@ -26,6 +26,8 @@ import { Link } from "react-router";
 import {
   Activity,
   ArrowLeft,
+  Coins,
+  Cpu,
   FolderKanban,
   Loader2,
   MessageSquare,
@@ -183,6 +185,12 @@ export default function Admin() {
             hint={`${numberFormat.format(data.totals.attachments)} файлов загружено`}
             icon={Activity}
           />
+          <Stat
+            label="Генераций моделей"
+            value={data.totals.generations}
+            hint={`${numberFormat.format(data.totals.tokens)} токенов · ≈${data.totals.costRub.toFixed(2)} ₽`}
+            icon={Cpu}
+          />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
@@ -265,6 +273,55 @@ export default function Admin() {
             </CardContent>
           </Card>
         </div>
+
+        <Card className="gap-0 rounded-lg border-border/70 py-5">
+          <CardHeader className="px-5 pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium">
+              <Coins className="size-3.5 text-muted-foreground" />
+              Расход моделей
+            </CardTitle>
+            <CardDescription className="text-xs">
+              {numberFormat.format(data.totals.generations)} вызовов ·{" "}
+              {numberFormat.format(data.totals.tokens)} токенов · оценка{" "}
+              {data.totals.costRub.toFixed(2)} ₽
+              {data.usageCapped ? " · по последним 5000 вызовам" : ""}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-5">
+            {data.spendByModel.length === 0 ? (
+              <p className="py-6 text-center text-xs text-muted-foreground/80">
+                Ещё не было ни одной генерации.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Провайдер / модель</TableHead>
+                    <TableHead className="text-right text-xs">Вызовы</TableHead>
+                    <TableHead className="text-right text-xs">Токены</TableHead>
+                    <TableHead className="text-right text-xs">Оценка, ₽</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.spendByModel.map((entry) => (
+                    <TableRow key={entry.model}>
+                      <TableCell className="font-mono text-xs">{entry.model}</TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">
+                        {numberFormat.format(entry.calls)}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">
+                        {numberFormat.format(entry.tokens)}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">
+                        {entry.costRub > 0 ? entry.costRub.toFixed(2) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card className="gap-0 rounded-lg border-border/70 py-5">

@@ -29,6 +29,41 @@ export const overview = query({
     const messages = await ctx.db.query("messages").take(MESSAGE_SCAN_LIMIT);
     const messagesCapped = messages.length === MESSAGE_SCAN_LIMIT;
 
+    // Model spend: what the deployment actually consumed, per model.
+    const usageRows = await ctx.db.query("apiUsage").take(MESSAGE_SCAN_LIMIT);
+    const usageCapped = usageRows.length === MESSAGE_SCAN_LIMIT;
+    interface SpendBucket {
+      calls: number;
+      tokens: number;
+      costRub: number;
+    }
+    const spendBuckets: Record<string, SpendBucket> = {};
+    for (const row of usageRows) {
+      const key = `${row.provider}/${row.apiModel}`;
+      const bucket = spendBuckets[key] ?? { calls: 0, tokens: 0, costRub: 0 };
+      bucket.calls += 1;
+      bucket.tokens += row.promptTokens + row.completionTokens;
+      bucket.costRub += row.costRub ?? 0;
+      spendBuckets[key] = bucket;
+    }
+    const spendByModel = Object.entries(spendBuckets)
+      .map(([model, stats]) => ({
+        model,
+        calls: stats.calls,
+        tokens: stats.tokens,
+        costRub: Math.round(stats.costRub * 100) / 100,
+      }))
+      .sort((a, b) => b.costRub - a.costRub || b.calls - a.calls)
+      .slice(0, 8);
+    const totalTokens = usageRows.reduce(
+      (sum, row) => sum + row.promptTokens + row.completionTokens,
+      0,
+    );
+    const totalCostRub =
+      Math.round(
+        usageRows.reduce((sum, row) => sum + (row.costRub ?? 0), 0) * 100,
+      ) / 100;
+
     const today = new Date().toISOString().slice(0, 10);
     const sessionRows = await ctx.db.query("sessions").collect();
 
@@ -108,8 +143,13 @@ export const overview = query({
         sessionsToday: sessionRows
           .filter((row) => row.day === today)
           .reduce((sum, row) => sum + row.used, 0),
+        generations: usageRows.length,
+        tokens: totalTokens,
+        costRub: totalCostRub,
       },
       messagesCapped,
+      usageCapped,
+      spendByModel,
       recentUsers,
       recentProjects,
       connectionsByService,

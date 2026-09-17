@@ -1,5 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { MODELS, getModel, DEFAULT_MODEL_ID, DAILY_SESSION_LIMIT } from "./models";
+import {
+  DEFAULT_PROVIDER,
+  PROVIDERS,
+  estimateCostRub,
+  getProvider,
+  resolveProviderEndpoint,
+} from "./providers";
+import {
+  HOUR_MS,
+  MAX_REVIEW_ROUNDS,
+  RATE_LIMITS,
+  countWithinWindow,
+  describeModelError,
+  extractHtml,
+  extractProjectFiles,
+  formatProjectContext,
+  isRetryableStatus,
+  parseReview,
+  selectRelevantFiles,
+  truncate,
+} from "./generation-core";
 import { BUILT_IN_SKILLS, parseCustomSkill, SKILL_CATEGORIES } from "./skills";
 import { STARTER_TEMPLATES } from "./templates";
 import { CAPABILITIES } from "./capabilities";
@@ -47,8 +68,9 @@ describe("models catalog", () => {
     expect(ids.size).toBe(MODELS.length);
   });
 
-  test("default model id points at a real model", () => {
+  test("default model id points at a real model of the default provider", () => {
     expect(MODELS.some((m) => m.id === DEFAULT_MODEL_ID)).toBe(true);
+    expect(getModel(DEFAULT_MODEL_ID).provider).toBe(DEFAULT_PROVIDER);
   });
 
   test("getModel falls back to the first model on unknown id", () => {
@@ -59,8 +81,30 @@ describe("models catalog", () => {
   });
 
   test("getModel returns the requested model when it exists", () => {
-    const model = getModel("gpt-5.6-luna");
-    expect(model.name).toBe("GPT-5.6 Luna");
+    const model = getModel("deepseek-chat");
+    expect(model.name).toBe("DeepSeek Chat");
+    expect(model.apiModel).toBe("deepseek-chat");
+  });
+
+  test("every catalog entry routes to a declared provider", () => {
+    const known = new Set(PROVIDERS.map((p) => p.id));
+    for (const model of MODELS) {
+      expect(known.has(model.provider)).toBe(true);
+    }
+  });
+
+  test("a non-OpenAI model never silently carries an OpenAI model id", () => {
+    for (const model of MODELS) {
+      if (model.provider === "openai" || model.provider === "local") continue;
+      expect(model.apiModel.startsWith("gpt-")).toBe(false);
+    }
+  });
+
+  test("no invented marketing versions in the catalog", () => {
+    for (const model of MODELS) {
+      expect(model.name).not.toMatch(/\bV\d+\.\d+ (Flash|Pro)\b/);
+      expect(model.apiModel).not.toMatch(/\s/);
+    }
   });
 
   test("session-based models declare costsSession consistently", () => {
@@ -483,5 +527,188 @@ describe("ru services catalog", () => {
     for (const id of ["bitrix24", "o3", "amocrm", "yookassa", "cdek", "dadata", "telegram"]) {
       expect(findService(id)).toBeDefined();
     }
+  });
+});
+
+/* ------------------------------- providers ------------------------------- */
+
+describe("model providers", () => {
+  test("provider ids are unique and carry a base URL and a key var", () => {
+    const ids = new Set(PROVIDERS.map((p) => p.id));
+    expect(ids.size).toBe(PROVIDERS.length);
+    for (const provider of PROVIDERS) {
+      expect(provider.baseUrl.startsWith("http")).toBe(true);
+      expect(provider.baseUrl.endsWith("/")).toBe(false);
+      expect(provider.keyEnv.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("endpoint uses the provider's own public API by default", () => {
+    const endpoint = resolveProviderEndpoint(getProvider("deepseek"), () => undefined);
+    expect(endpoint.baseUrl).toBe("https://api.deepseek.com/v1");
+    expect(endpoint.chatUrl).toBe("https://api.deepseek.com/v1/chat/completions");
+    expect(endpoint.apiKey).toBe("");
+    expect(endpoint.gatewayOverride).toBe(false);
+  });
+
+  test("each provider reads its own key, not a global one", () => {
+    const env = { ZHIPU_API_KEY: "zhipu-key" } as Record<string, string>;
+    const reader = (name: string) => env[name];
+    const glm = resolveProviderEndpoint(getProvider("zhipu"), reader);
+    expect(glm.apiKey).toBe("zhipu-key");
+    expect(glm.keyEnv).toBe("ZHIPU_API_KEY");
+
+    const deepseek = resolveProviderEndpoint(getProvider("deepseek"), reader);
+    expect(deepseek.apiKey).toBe("");
+  });
+
+  test("OPENAI_BASE_URL still forces a single gateway", () => {
+    const env: Record<string, string> = {
+      OPENAI_BASE_URL: "https://gateway.internal/v1/",
+      OPENAI_API_KEY: "gateway-key",
+    };
+    const endpoint = resolveProviderEndpoint(getProvider("openai"), (n) => env[n]);
+    expect(endpoint.baseUrl).toBe("https://gateway.internal/v1");
+    expect(endpoint.apiKey).toBe("gateway-key");
+    expect(endpoint.gatewayOverride).toBe(true);
+  });
+
+  test("provider base URL override wins over the public default", () => {
+    const env: Record<string, string> = { DEEPSEEK_BASE_URL: "http://127.0.0.1:8080/v1" };
+    const endpoint = resolveProviderEndpoint(getProvider("deepseek"), (n) => env[n]);
+    expect(endpoint.baseUrl).toBe("http://127.0.0.1:8080/v1");
+  });
+
+  test("cost estimate uses published prices and refuses to invent one", () => {
+    const known = estimateCostRub("deepseek-chat", 1_000_000, 0, 100);
+    expect(known).toBe(28);
+    expect(estimateCostRub("glm-4-flash", 1_000_000, 0)).toBeNull();
+    expect(estimateCostRub("some-unknown-model", 10, 10)).toBeNull();
+  });
+});
+
+/* --------------------------- generation pipeline -------------------------- */
+
+describe("generation core", () => {
+  test("truncate keeps short text and marks long text", () => {
+    expect(truncate("short", 100)).toBe("short");
+    const long = truncate("x".repeat(200), 10);
+    expect(long.startsWith("x".repeat(10))).toBe(true);
+    expect(long).toContain("truncated");
+  });
+
+  test("extractHtml unwraps fences and raw documents", () => {
+    expect(extractHtml("```html\n<h1>hi</h1>\n```")).toBe("<h1>hi</h1>");
+    expect(
+      extractHtml("noise <!DOCTYPE html><html><body>ok</body></html> tail"),
+    ).toBe("<!DOCTYPE html><html><body>ok</body></html>");
+  });
+
+  test("extractProjectFiles reads a JSON manifest", () => {
+    const raw = JSON.stringify({
+      files: [
+        { path: "index.html", content: "<html></html>", language: "html" },
+        { path: "src/App.tsx", content: "export default 1;" },
+      ],
+    });
+    const files = extractProjectFiles(raw);
+    expect(files.length).toBe(2);
+    expect(files[1].path).toBe("src/App.tsx");
+  });
+
+  test("extractProjectFiles falls back to raw HTML", () => {
+    const files = extractProjectFiles("<html><body>raw</body></html>");
+    expect(files.length).toBe(1);
+    expect(files[0].path).toBe("index.html");
+  });
+
+  test("extractProjectFiles keeps malformed entries out", () => {
+    const files = extractProjectFiles('{"files":[{"path":"a.html"},{"content":"x"}]}');
+    expect(files.length).toBe(1);
+    expect(files[0].path).toBe("index.html");
+  });
+
+  test("a vague reviewer answer is not mistaken for approval", () => {
+    expect(parseReview('{"verdict":"ok","issues":[]}').verdict).toBe("ok");
+    expect(parseReview('```json\n{"verdict":"fix","issues":["кнопка не работает"]}\n```').verdict).toBe("fix");
+    expect(parseReview('{"verdict":"ok"}').verdict).toBe("ok");
+    expect(parseReview("Looks good, OK.").verdict).toBe("ok");
+  });
+
+  test("structured issues are extracted from reviewer JSON", () => {
+    const review = parseReview(
+      '{"verdict":"fix","issues":["нет обработчика формы","дублируется CSS"]}',
+    );
+    expect(review.issues).toEqual(["нет обработчика формы", "дублируется CSS"]);
+  });
+
+  test("legacy FIX: answers still drive a repair pass", () => {
+    const review = parseReview("FIX: \n- hello button does nothing\n- missing footer");
+    expect(review.verdict).toBe("fix");
+    expect(review.issues.length).toBeGreaterThan(0);
+  });
+
+  test("empty reviewer output is not a failure", () => {
+    expect(parseReview("   ").verdict).toBe("ok");
+  });
+
+  test("repair loop is bounded", () => {
+    expect(MAX_REVIEW_ROUNDS).toBeGreaterThan(0);
+    expect(MAX_REVIEW_ROUNDS).toBeLessThanOrEqual(2);
+  });
+
+  test("errors are translated, and never echo the provider body", () => {
+    const leak = '{"error":{"message":"Incorrect API key sk-secret-123"}}';
+    for (const status of [400, 401, 402, 404, 413, 429, 500, 503]) {
+      const message = describeModelError(status, "DeepSeek", leak);
+      expect(message).not.toContain("sk-secret-123");
+      expect(message).not.toContain("Incorrect API key");
+      expect(message.length).toBeGreaterThan(15);
+    }
+    expect(describeModelError(401, "DeepSeek")).toContain("Ключ");
+    expect(describeModelError(429, "DeepSeek")).toContain("частот");
+  });
+
+  test("only transient statuses are retried", () => {
+    expect(isRetryableStatus(429)).toBe(true);
+    expect(isRetryableStatus(500)).toBe(true);
+    expect(isRetryableStatus(401)).toBe(false);
+    expect(isRetryableStatus(404)).toBe(false);
+  });
+
+  test("relevant files are selected instead of the whole project", () => {
+    const files = [
+      { path: "index.html", content: "<html></html>" },
+      { path: "src/checkout.tsx", content: "export default function Checkout() {}" },
+      { path: "src/unrelated.ts", content: "const x = 1;" },
+    ];
+    const selected = selectRelevantFiles(files, "почини checkout корзину", 10_000);
+    expect(selected[0].path).toBe("index.html");
+    expect(selected.map((f) => f.path)).toContain("src/checkout.tsx");
+  });
+
+  test("context selection respects the character budget", () => {
+    const files = [
+      { path: "index.html", content: "a".repeat(1000) },
+      { path: "big.ts", content: "b".repeat(10_000) },
+    ];
+    const selected = selectRelevantFiles(files, "big changes", 1200);
+    const total = selected.reduce((sum, file) => sum + file.content.length, 0);
+    expect(total).toBeLessThanOrEqual(1400);
+  });
+
+  test("project context labels every file", () => {
+    const text = formatProjectContext([{ path: "index.html", content: "<html></html>" }]);
+    expect(text).toContain("--- index.html ---");
+  });
+
+  test("rate limits count calls inside the rolling window", () => {
+    const now = 1_000_000_000;
+    const records = [
+      { promptTokens: 1, completionTokens: 1, createdAt: now - 60_000 },
+      { promptTokens: 1, completionTokens: 1, createdAt: now - HOUR_MS * 2 },
+    ];
+    expect(countWithinWindow(records, HOUR_MS, now)).toBe(1);
+    expect(RATE_LIMITS.anonymousPerDay).toBeLessThan(RATE_LIMITS.perUserPerDay);
   });
 });

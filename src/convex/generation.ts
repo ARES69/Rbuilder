@@ -1,26 +1,37 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
-import { getModel } from "../lib/models";
+import { getModel, getProvider } from "../lib/models";
+import {
+  DEFAULT_USD_RUB_RATE,
+  estimateCostRub,
+  missingKeyMessage,
+  resolveProviderEndpoint,
+} from "../lib/providers";
+import {
+  DAY_MS,
+  HOUR_MS,
+  MAX_REVIEW_ROUNDS,
+  REVIEW_PROMPT,
+  describeModelError,
+  extractHtml,
+  extractProjectFiles,
+  formatProjectContext,
+  isRetryableStatus,
+  parseReview,
+  selectRelevantFiles,
+  truncate,
+  type GeneratedFile,
+} from "../lib/generation-core";
+import { decideRateLimit } from "./usage";
 import { architectureContract } from "../lib/architecture";
 import { buildResearchQuery, formatResearch } from "../lib/research";
-import {
-  defaultEnabledToolIds,
-  hasTool,
-  toolDirectives,
-} from "../lib/tools";
+import { defaultEnabledToolIds, hasTool, toolDirectives } from "../lib/tools";
 
-/**
- * Any OpenAI-compatible endpoint works here — critical for RF users:
- * DeepSeek (api.deepseek.com/v1), GLM (open.bigmodel.cn/api/paas/v4),
- * GigaChat-compat proxies, local gateways, etc. Billing in rubles,
- * no foreign card needed. Only the path `/chat/completions` is appended.
- */
-const OPENAI_BASE_URL =
-  (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, "");
-const OPENAI_CHAT_URL = `${OPENAI_BASE_URL}/chat/completions`;
 const MAX_ATTACHMENT_CHARS = 12_000;
 const MAX_HTML_CHARS = 400_000;
+/** How much existing code goes back into the prompt. */
+const MAX_CONTEXT_CHARS = 120_000;
 
 interface TraceEntry {
   agent: string;
@@ -28,10 +39,15 @@ interface TraceEntry {
   ms: number;
 }
 
-interface GeneratedFile {
-  path: string;
-  content: string;
-  language?: string;
+interface Usage {
+  promptTokens: number;
+  completionTokens: number;
+}
+
+interface Target {
+  chatUrl: string;
+  apiKey: string;
+  providerLabel: string;
 }
 
 const CONTEXT_PROMPT = `You are the context agent in a web-app building pipeline. Given the user's request and optional attached files, produce a concise brief: what kind of app is needed, key screens/features, and any requirements from the attachments. Reply in 3-6 bullet points. No preamble.`;
@@ -48,48 +64,7 @@ STRICT OUTPUT RULES:
 5. Make it beautiful: intentional typography, spacing, a restrained color palette, hover states, and responsive layout.
 6. Fully implement the described functionality — working state, event handlers, and realistic seed data. Never leave stubs.
 
-If a previous version of the app is provided, treat it as the current code and apply the plan, keeping everything else intact.`;
-
-const REVIEW_PROMPT = `You are the reviewer agent in a web-app building pipeline. You receive an app's HTML and the plan it was built from. Check it for: broken structure, missing functionality versus the plan, stubs or placeholder text, script errors. Reply with either "OK" if acceptable, or a one-paragraph fix list starting with "FIX:".`;
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}\n<!-- truncated -->`;
-}
-
-function extractHtml(raw: string): string {
-  const text = raw.trim();
-  const fenced = text.match(/```(?:html)?\s*([\s\S]*?)```/i);
-  const body = fenced ? fenced[1] : text;
-  const doc = body.match(/<!DOCTYPE html[\s\S]*<\/html>/i);
-  return (doc ? doc[0] : body).trim();
-}
-
-function extractProjectFiles(raw: string): GeneratedFile[] {
-  const text = raw.trim();
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1].trim() : text;
-  try {
-    const parsed = JSON.parse(candidate) as { files?: unknown };
-    if (Array.isArray(parsed.files)) {
-      const files = parsed.files.filter(
-        (file): file is GeneratedFile =>
-          typeof file === "object" &&
-          file !== null &&
-          typeof (file as { path?: unknown }).path === "string" &&
-          typeof (file as { content?: unknown }).content === "string",
-      );
-      if (files.length > 0) return files.slice(0, 50);
-    }
-  } catch {
-    // Older/provider models may still return raw HTML; keep that format working.
-  }
-  return [{ path: "index.html", content: extractHtml(raw), language: "html" }];
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+If previous files are provided, treat them as the current code and change only what the plan requires, keeping everything else byte-identical.`;
 
 const PLANNING_PROMPT = `You are the solution architect for RBuilder. Analyze the user's product request and return a concise Russian project plan with exactly these sections:
 Цель:
@@ -101,36 +76,16 @@ const PLANNING_PROMPT = `You are the solution architect for RBuilder. Analyze th
 Риски:
 Use concrete names, avoid generic filler, and keep the whole answer under 1800 characters.`;
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function fallbackPlan(prompt: string): string {
   return `Цель:\nСоздать рабочее веб-приложение по запросу пользователя.\n\nПользователи:\nОпределяются ролями и сценариями из запроса.\n\nЭкраны:\nГлавный экран, рабочий раздел, настройки и состояния загрузки/ошибок.\n\nДанные:\nОсновные сущности приложения, записи пользователя и настройки проекта.\n\nИнтеграции:\nПодключать только те сервисы, которые нужны запросу: API-ключи хранятся на сервере.\n\nЭтапы:\n1. Создать структуру экранов.\n2. Добавить состояние и основные действия.\n3. Подключить данные и интеграции.\n4. Проверить адаптивность и ошибки.\n\nРиски:\nНужно уточнить роли, реальные источники данных и требования к публикации.\n\nЗапрос:\n${prompt}`;
 }
 
-export const plan = action({
-  args: {
-    prompt: v.string(),
-    modelId: v.optional(v.string()),
-    architectureId: v.optional(v.string()),
-  },
-  handler: async (ctx, { prompt, modelId, architectureId }) => {
-    const user = await ctx.runQuery(api.users.currentUser);
-    if (!user) throw new Error("Not authenticated");
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return { plan: fallbackPlan(prompt), demo: true };
-    const model = getModel(modelId);
-    const contract = architectureContract(architectureId);
-    const planText = await callModel(
-      apiKey,
-      model.apiModel,
-      PLANNING_PROMPT,
-      `${contract}\n\nЗапрос пользователя:\n${prompt}`,
-      900,
-    );
-    return { plan: planText.trim() || fallbackPlan(prompt), demo: false };
-  },
-});
-
-/** Deterministic fallback app shown when no model API key is configured. */
-function fallbackHtml(prompt: string): string {
+/** Deterministic fallback app shown when the selected provider has no key. */
+function fallbackHtml(prompt: string, reason: string): string {
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -152,46 +107,147 @@ function fallbackHtml(prompt: string): string {
 <body>
   <div class="card">
     <h1>Предпросмотр приложения</h1>
-    <p>Здесь рендерится ровно то, что пишет конвейер агентов — один самодостаточный HTML-файл, пересобираемый после каждого запроса. Сейчас работает демо-режим: добавьте <code>OPENAI_API_KEY</code> (или любой совместимый провайдер через <code>OPENAI_BASE_URL</code>, например DeepSeek) во вкладке «API-ключи», и каждый билд станет настоящим приложением. RBuilder полностью бесплатен.</p>
+    <p>${escapeHtml(reason)}</p>
     <div class="prompt">${escapeHtml(prompt)}</div>
   </div>
 </body>
 </html>`;
 }
 
+/** Timers exist in the Convex action runtime; degrade to no delay if absent. */
+async function sleep(ms: number): Promise<void> {
+  if (typeof setTimeout !== "function") return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * One model call, with retry on transient failures.
+ *
+ * Failures are translated into readable messages — the provider body is never
+ * forwarded, because it leaks keys and internal URLs and is unreadable anyway.
+ */
 async function callModel(
-  apiKey: string,
+  target: Target,
   apiModel: string,
   system: string,
   user: string,
   maxTokens: number,
-): Promise<string> {
-  const response = await fetch(OPENAI_CHAT_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: apiModel,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0.4,
-      max_tokens: maxTokens,
-    }),
+  options?: { json?: boolean },
+): Promise<{ text: string; usage: Usage }> {
+  const body = JSON.stringify({
+    model: apiModel,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    temperature: 0.4,
+    max_tokens: maxTokens,
+    ...(options?.json ? { response_format: { type: "json_object" } } : {}),
   });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(
-      `Model request failed (${response.status}). ${detail.slice(0, 200)}`,
-    );
+
+  let lastError: Error | null = null;
+  const attempts = 2;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(target.chatUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${target.apiKey}`,
+        },
+        body,
+      });
+    } catch {
+      lastError = new Error(
+        `Не удалось связаться с ${target.providerLabel}. Проверьте соединение и повторите.`,
+      );
+      if (attempt < attempts - 1) await sleep(600 * (attempt + 1));
+      continue;
+    }
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      const message = describeModelError(
+        response.status,
+        target.providerLabel,
+        detail,
+      );
+      if (isRetryableStatus(response.status) && attempt < attempts - 1) {
+        lastError = new Error(message);
+        // Rate limits need a real pause; provider hiccups just need a beat.
+        await sleep(response.status === 429 ? 2_000 : 800);
+        continue;
+      }
+      throw new Error(message);
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+    return {
+      text: data.choices?.[0]?.message?.content ?? "",
+      usage: {
+        promptTokens: data.usage?.prompt_tokens ?? 0,
+        completionTokens: data.usage?.completion_tokens ?? 0,
+      },
+    };
   }
-  const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  return data.choices?.[0]?.message?.content ?? "";
+
+  throw lastError ?? new Error("Модель не ответила. Попробуйте ещё раз.");
+}
+
+const previousFilesValidator = v.optional(
+  v.array(
+    v.object({
+      path: v.string(),
+      content: v.string(),
+      language: v.optional(v.string()),
+    }),
+  ),
+);
+
+export const plan = action({
+  args: {
+    prompt: v.string(),
+    modelId: v.optional(v.string()),
+    architectureId: v.optional(v.string()),
+  },
+  handler: async (ctx, { prompt, modelId, architectureId }) => {
+    const user = await ctx.runQuery(api.users.currentUser);
+    if (!user) throw new Error("Not authenticated");
+
+    const model = getModel(modelId);
+    const provider = getProvider(model.provider);
+    const endpoint = resolveProviderEndpoint(provider, (name) => process.env[name]);
+    if (!endpoint.apiKey) {
+      return { plan: fallbackPlan(prompt), demo: true, model: model.apiModel };
+    }
+    const contract = architectureContract(architectureId);
+    const result = await callModel(
+      {
+        chatUrl: endpoint.chatUrl,
+        apiKey: endpoint.apiKey,
+        providerLabel: provider.label,
+      },
+      apiModelFor(model.provider, model.apiModel),
+      PLANNING_PROMPT,
+      `${contract}\n\nЗапрос пользователя:\n${prompt}`,
+      900,
+    );
+    return {
+      plan: result.text.trim() || fallbackPlan(prompt),
+      demo: false,
+      model: model.apiModel,
+    };
+  },
+});
+
+/** The local provider's model id is a deployment setting, not a catalog fact. */
+function apiModelFor(provider: string, apiModel: string): string {
+  if (provider === "local") return process.env.LOCAL_MODEL_ID ?? apiModel;
+  return apiModel;
 }
 
 export const run = action({
@@ -199,24 +255,89 @@ export const run = action({
     prompt: v.string(),
     modelId: v.optional(v.string()),
     architectureId: v.optional(v.string()),
+    projectId: v.optional(v.id("projects")),
     previousHtml: v.optional(v.string()),
+    /** Canonical source of the current code — preferred over `previousHtml`. */
+    previousFiles: previousFilesValidator,
     attachmentIds: v.optional(v.array(v.id("attachments"))),
     /** Enabled skill prompt modules (from the Skills tab). */
     skillPrompts: v.optional(v.array(v.string())),
     /** Enabled tool ids (from the Tools tab). */
     toolIds: v.optional(v.array(v.string())),
+    /** Agent run row to stream progress into (from the Workspaces panel). */
+    runId: v.optional(v.id("agentRuns")),
   },
   handler: async (
     ctx,
-    { prompt, modelId, architectureId, previousHtml, attachmentIds, skillPrompts, toolIds },
+    {
+      prompt,
+      modelId,
+      architectureId,
+      projectId,
+      previousHtml,
+      previousFiles,
+      attachmentIds,
+      skillPrompts,
+      toolIds,
+      runId,
+    },
   ) => {
     const user = await ctx.runQuery(api.users.currentUser);
     if (!user) throw new Error("Not authenticated");
 
     const model = getModel(modelId);
+    const provider = getProvider(model.provider);
+    const endpoint = resolveProviderEndpoint(provider, (name) => process.env[name]);
+    const apiModel = apiModelFor(model.provider, model.apiModel);
+    const target: Target = {
+      chatUrl: endpoint.chatUrl,
+      apiKey: endpoint.apiKey,
+      providerLabel: provider.label,
+    };
     const contract = architectureContract(architectureId);
-    const apiKey = process.env.OPENAI_API_KEY;
+    const total: Usage = { promptTokens: 0, completionTokens: 0 };
+
     const trace: TraceEntry[] = [];
+    /** Announce the stage that is about to run (live progress in the UI). */
+    const begin = async (agent: string, note: string) => {
+      if (!runId) return;
+      await ctx.runMutation(internal.workspaces.progress, {
+        runId,
+        step: `${agent} · ${note}`,
+      });
+    };
+    /** Close a stage and append it to the trace. */
+    const end = async (agent: string, note: string, startedAt: number) => {
+      const entry: TraceEntry = { agent, note, ms: Date.now() - startedAt };
+      trace.push(entry);
+      if (runId) {
+        await ctx.runMutation(internal.workspaces.progress, { runId, entry });
+      }
+    };
+    const call = async (
+      system: string,
+      user: string,
+      maxTokens: number,
+      options?: { json?: boolean },
+    ) => {
+      const result = await callModel(target, apiModel, system, user, maxTokens, options);
+      total.promptTokens += result.usage.promptTokens;
+      total.completionTokens += result.usage.completionTokens;
+      return result.text;
+    };
+    /**
+     * Reviewer call. Strict JSON is requested for reliability, but not every
+     * OpenAI-compatible gateway supports `response_format` — if it is rejected
+     * we retry without it and let the parser handle prose, instead of failing
+     * a whole build over an optional parameter.
+     */
+    const callReview = async (user: string) => {
+      try {
+        return await call(REVIEW_PROMPT, user, 600, { json: true });
+      } catch {
+        return await call(REVIEW_PROMPT, user, 600);
+      }
+    };
 
     // Enabled skills are appended to the builder instructions
     const skillsBlock =
@@ -256,19 +377,71 @@ export const run = action({
       }
     }
 
-    if (!apiKey) {
+    // The model the user picked must actually be reachable. Without a key we
+    // say exactly what is missing instead of quietly answering with another
+    // provider's model (which used to surface as a confusing 404).
+    if (!endpoint.apiKey) {
       return {
-        html: truncate(fallbackHtml(prompt), MAX_HTML_CHARS),
+        html: truncate(
+          fallbackHtml(prompt, missingKeyMessage(provider, endpoint)),
+          MAX_HTML_CHARS,
+        ),
         demo: true,
-        trace: [{ agent: "builder", note: "demo mode", ms: 0 }],
+        notice: missingKeyMessage(provider, endpoint),
+        trace: [{ agent: "builder", note: `нет ключа ${provider.label}`, ms: 0 }],
+        usage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          costRub: null,
+          provider: provider.id,
+          apiModel,
+        },
       };
     }
 
+    // Abuse guard: guests are capped hard, signed-in users get a rolling hour.
+    const now = Date.now();
+    const [lastHour, lastDay] = await Promise.all([
+      ctx.runQuery(internal.usage.countSince, {
+        userId: user._id,
+        since: now - HOUR_MS,
+      }),
+      ctx.runQuery(internal.usage.countSince, {
+        userId: user._id,
+        since: now - DAY_MS,
+      }),
+    ]);
+    const verdict = decideRateLimit({
+      isAnonymous: Boolean(user.isAnonymous),
+      lastHour,
+      lastDay,
+    });
+    if (!verdict.allowed) {
+      throw new Error(verdict.reason ?? "Слишком много генераций. Попробуйте позже.");
+    }
+
+    // Current code: prefer real files and only send what this request needs —
+    // replaying a whole project into every prompt is what made edits expensive.
+    const storedFiles =
+      !previousFiles?.length && projectId
+        ? await ctx.runQuery(api.projectFiles.list, { projectId })
+        : [];
+    const currentFiles: GeneratedFile[] = previousFiles?.length
+      ? previousFiles
+      : storedFiles.length
+        ? storedFiles
+        : previousHtml
+          ? [{ path: "index.html", content: previousHtml, language: "html" }]
+          : [];
+    const selectedFiles = selectRelevantFiles(currentFiles, prompt, MAX_CONTEXT_CHARS);
+    const currentContext = selectedFiles.length
+      ? formatProjectContext(selectedFiles)
+      : "";
+
     // Stage 1 — context agent
-    let t0 = Date.now();
-    const brief = await callModel(
-      apiKey,
-      model.apiModel,
+    let startedAt = Date.now();
+    await begin("context", "разбираю запрос");
+    const brief = await call(
       CONTEXT_PROMPT,
       [
         attachmentContext.length
@@ -281,14 +454,15 @@ export const run = action({
         .join("\n\n"),
       500,
     );
-    trace.push({ agent: "context", note: "mapped the request", ms: Date.now() - t0 });
+    await end("context", "запрос разобран", startedAt);
 
     // Stage 1.5 — researcher (only when the `web_search` tool is on). Fetches
     // real sources so the build is grounded instead of invented; `read_url`
     // additionally reads the top result pages. Failures never break a build.
     let research = "";
     if (hasTool(activeTools, "web_search")) {
-      t0 = Date.now();
+      startedAt = Date.now();
+      await begin("researcher", "ищу источники");
       try {
         const digest = await ctx.runAction(internal.research.search, {
           query: buildResearchQuery(prompt),
@@ -296,40 +470,31 @@ export const run = action({
         });
         if (digest.sources.length > 0) {
           research = formatResearch(digest);
-          trace.push({
-            agent: "researcher",
-            note: `${digest.provider}: ${digest.sources.length} источников`,
-            ms: Date.now() - t0,
-          });
+          await end(
+            "researcher",
+            `${digest.provider}: ${digest.sources.length} источников`,
+            startedAt,
+          );
         } else {
-          trace.push({
-            agent: "researcher",
-            note: "источники не найдены",
-            ms: Date.now() - t0,
-          });
+          await end("researcher", "источники не найдены", startedAt);
         }
       } catch {
-        trace.push({
-          agent: "researcher",
-          note: "research unavailable",
-          ms: Date.now() - t0,
-        });
+        await end("researcher", "research unavailable", startedAt);
       }
     }
 
     // Stage 2 — planner agent (skipped when the `thinker` tool is off)
     let plan = "";
     if (usePlanner) {
-      t0 = Date.now();
-      plan = await callModel(
-        apiKey,
-        model.apiModel,
+      startedAt = Date.now();
+      await begin("planner", "составляю план");
+      plan = await call(
         PLAN_PROMPT,
         [
           `Brief:\n${brief}`,
           research ? `Web research:\n${research}` : null,
-          previousHtml
-            ? `Current app code exists (${previousHtml.length} chars) — plan only the changes.`
+          currentFiles.length
+            ? `Current app code exists (${selectedFiles.length} из ${currentFiles.length} файлов в контексте) — plan only the changes.`
             : "Brand new app — plan the full build.",
           `Request:\n${prompt}`,
         ]
@@ -337,17 +502,14 @@ export const run = action({
           .join("\n\n"),
         500,
       );
-      trace.push({
-        agent: "planner",
-        note: "drafted the build plan",
-        ms: Date.now() - t0,
-      });
+      await end("planner", "план готов", startedAt);
     } else {
-      trace.push({ agent: "planner", note: "skipped (thinker off)", ms: 0 });
+      trace.push({ agent: "planner", note: "пропущен (thinker выключен)", ms: 0 });
     }
 
     // Stage 3 — builder agent
-    t0 = Date.now();
+    startedAt = Date.now();
+    await begin("builder", "пишу код");
     const buildInput = [
       attachmentContext.length
         ? `Attached files:\n${attachmentContext.join("\n\n")}`
@@ -357,16 +519,14 @@ export const run = action({
         ? `Web research (real sources — use these facts, prices and names instead of inventing them):\n${research}`
         : null,
       plan ? `Plan:\n${plan}` : null,
-      previousHtml
-        ? `Current app code:\n${truncate(previousHtml, MAX_HTML_CHARS)}`
+      currentContext
+        ? `Current project files:\n${currentContext}`
         : "This is a brand new app — no previous version exists yet.",
       `Request:\n${prompt}`,
     ]
       .filter(Boolean)
       .join("\n\n");
-    const raw = await callModel(
-      apiKey,
-      model.apiModel,
+    const raw = await call(
       `${BUILD_PROMPT}\n\n${contract}${skillsBlock}${toolsBlock}`,
       buildInput,
       16000,
@@ -374,74 +534,114 @@ export const run = action({
     let files = extractProjectFiles(raw);
     let html = files.find((file) => file.path === "index.html")?.content ?? extractHtml(raw);
     if (!html) {
-      throw new Error("The model returned an empty response. Please try again.");
+      throw new Error("Модель вернула пустой ответ. Попробуйте ещё раз.");
     }
-    files = files.map((file) => ({
-      ...file,
-      path: file.path.trim().replace(/^\/+/, ""),
-    })).filter((file) => file.path && !file.path.includes(".."));
-    trace.push({
-      agent: "builder",
-      note: `wrote v${(previousHtml?.length ?? 0) > 0 ? "update" : "1"} (${html.length} chars)`,
-      ms: Date.now() - t0,
-    });
-
-    // Stage 4 — reviewer agent (one repair pass when it flags problems)
-    t0 = Date.now();
-    if (!useReviewer) {
-      trace.push({ agent: "reviewer", note: "skipped (reviewer off)", ms: 0 });
-      return {
-        html: truncate(html, MAX_HTML_CHARS),
-        files: files.map((file) => ({
-          ...file,
-          content: file.path === "index.html" ? truncate(file.content, MAX_HTML_CHARS) : file.content,
-        })),
-        demo: false,
-        trace,
-      };
-    }
-    const review = await callModel(
-      apiKey,
-      model.apiModel,
-      REVIEW_PROMPT,
-      [plan ? `Plan:\n${plan}` : null, `App HTML:\n${truncate(html, 120_000)}`]
-        .filter(Boolean)
-        .join("\n\n"),
-      600,
+    files = files
+      .map((file) => ({ ...file, path: file.path.trim().replace(/^\/+/, "") }))
+      .filter((file) => file.path && !file.path.includes(".."));
+    await end(
+      "builder",
+      `${currentFiles.length ? "обновил" : "создал"} проект (${html.length} символов)`,
+      startedAt,
     );
-    if (review.trim().toUpperCase().startsWith("FIX:")) {
-      const fixInput = [
-        `Current app code:\n${truncate(html, MAX_HTML_CHARS)}`,
-        `Reviewer notes:\n${review.trim()}`,
-        `Original request:\n${prompt}`,
-        `Apply the fixes and return the complete corrected HTML file. Raw HTML only.`,
-      ].join("\n\n");
-      const repaired = await callModel(
-        apiKey,
-        model.apiModel,
-        `${BUILD_PROMPT}\n\n${contract}${skillsBlock}${toolsBlock}`,
-        fixInput,
-        16000,
-      );
-      const repairedFiles = extractProjectFiles(repaired);
-      const repairedHtml = repairedFiles.find((file) => file.path === "index.html")?.content ?? extractHtml(repaired);
-      if (repairedHtml) {
-        html = repairedHtml;
-        files = repairedFiles;
-      }
-      trace.push({ agent: "reviewer", note: "requested fixes, rebuilt", ms: Date.now() - t0 });
+
+    // Stage 4 — reviewer agent: review, repair, re-review (bounded).
+    if (!useReviewer) {
+      trace.push({ agent: "reviewer", note: "пропущен (reviewer выключен)", ms: 0 });
     } else {
-      trace.push({ agent: "reviewer", note: "approved the build", ms: Date.now() - t0 });
+      startedAt = Date.now();
+      await begin("reviewer", "проверяю результат");
+      let review = parseReview(
+        await callReview(
+          [plan ? `Plan:\n${plan}` : null, `App HTML:\n${truncate(html, 120_000)}`]
+            .filter(Boolean)
+            .join("\n\n"),
+        ),
+      );
+
+      for (let round = 0; round < MAX_REVIEW_ROUNDS && review.verdict === "fix"; round += 1) {
+        await begin("reviewer", `правлю замечания (${round + 1}/${MAX_REVIEW_ROUNDS})`);
+        const fixInput = [
+          `Current project files:\n${truncate(html, MAX_CONTEXT_CHARS)}`,
+          `Reviewer issues (fix every one):\n${review.issues.map((issue) => `- ${issue}`).join("\n")}`,
+          `Original request:\n${prompt}`,
+          "Return the complete corrected project as the same JSON file manifest.",
+        ].join("\n\n");
+        const repaired = await call(
+          `${BUILD_PROMPT}\n\n${contract}${skillsBlock}${toolsBlock}`,
+          fixInput,
+          16000,
+        );
+        const repairedFiles = extractProjectFiles(repaired);
+        const repairedHtml =
+          repairedFiles.find((file) => file.path === "index.html")?.content ??
+          extractHtml(repaired);
+        if (repairedHtml) {
+          html = repairedHtml;
+          files = repairedFiles;
+        } else {
+          break;
+        }
+        review = parseReview(
+          await callReview(
+            [
+              plan ? `Plan:\n${plan}` : null,
+              `App HTML:\n${truncate(html, 120_000)}`,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+          ),
+        );
+      }
+
+      await end(
+        "reviewer",
+        review.verdict === "ok"
+          ? "проверка пройдена"
+          : `остались замечания: ${review.issues.length}`,
+        startedAt,
+      );
     }
+
+    // Accounting: one row per build so cost is visible inside RBuilder.
+    const parsedRate = Number(process.env.USD_RUB_RATE ?? DEFAULT_USD_RUB_RATE);
+    const usdRubRate = Number.isFinite(parsedRate) ? parsedRate : DEFAULT_USD_RUB_RATE;
+    const costRub = estimateCostRub(
+      apiModel,
+      total.promptTokens,
+      total.completionTokens,
+      usdRubRate,
+    );
+    await ctx.runMutation(internal.usage.record, {
+      userId: user._id,
+      projectId,
+      provider: provider.id,
+      apiModel,
+      promptTokens: total.promptTokens,
+      completionTokens: total.completionTokens,
+      costRub,
+      anonymous: Boolean(user.isAnonymous),
+      createdAt: Date.now(),
+    });
 
     return {
       html: truncate(html, MAX_HTML_CHARS),
       files: files.map((file) => ({
         ...file,
-        content: file.path === "index.html" ? truncate(file.content, MAX_HTML_CHARS) : file.content,
+        content:
+          file.path === "index.html"
+            ? truncate(file.content, MAX_HTML_CHARS)
+            : file.content,
       })),
       demo: false,
       trace,
+      usage: {
+        promptTokens: total.promptTokens,
+        completionTokens: total.completionTokens,
+        costRub,
+        provider: provider.id,
+        apiModel,
+      },
     };
   },
 });

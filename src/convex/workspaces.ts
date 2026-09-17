@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { getCurrentUser } from "./users";
 
@@ -112,6 +112,33 @@ export const startRun = mutation({
   },
 });
 
+/**
+ * Streaming progress for a running pipeline.
+ *
+ * The generation action calls this before and after every stage, so the UI can
+ * show a live trace instead of a single spinner for the whole build. `step`
+ * holds the stage in flight; completed stages are appended to `trace`.
+ */
+export const progress = internalMutation({
+  args: {
+    runId: v.id("agentRuns"),
+    step: v.optional(v.string()),
+    entry: v.optional(
+      v.object({
+        agent: v.string(),
+        note: v.optional(v.string()),
+        ms: v.number(),
+      }),
+    ),
+  },
+  handler: async (ctx, { runId, step, entry }) => {
+    const run = await ctx.db.get(runId);
+    if (!run) return;
+    const trace = entry ? [...(run.trace ?? []), entry].slice(-40) : run.trace;
+    await ctx.db.patch(runId, { trace, step: step ?? undefined });
+  },
+});
+
 export const finishRun = mutation({
   args: {
     runId: v.id("agentRuns"),
@@ -132,6 +159,6 @@ export const finishRun = mutation({
     if (!user) throw new Error("Not authenticated");
     const run = await ctx.db.get(runId);
     if (!run || run.userId !== user._id) throw new Error("Запуск не найден");
-    await ctx.db.patch(runId, { status, trace, error });
+    await ctx.db.patch(runId, { status, trace, error, step: error ?? undefined });
   },
 });

@@ -77,7 +77,7 @@ export const BUILT_IN_SKILLS: Skill[] = [
     desc: "Дебаунс, ленивые списки, переиспользование DOM",
     prompt:
       "CODE SKILL (performance): debounce input handlers (200ms), render long lists lazily or with pagination, avoid layout thrashing (batch DOM reads/writes), prefer event delegation for repeated items, use requestAnimationFrame for animations.",
-    compatibleModels: ["deepseek-v4", "glm-5"],
+    compatibleModels: ["deepseek-chat", "deepseek-reasoner", "glm-4-flash", "glm-4-plus"],
     builtIn: true,
   },
   {
@@ -88,7 +88,7 @@ export const BUILT_IN_SKILLS: Skill[] = [
     desc: "SVG-графики без библиотек, оси, тултипы",
     prompt:
       "DATA SKILL (charts): build charts as inline SVG without external libraries. Include axes with tick labels, gridlines, tooltips on hover, and a legend. Use the app's palette; make charts responsive via viewBox.",
-    compatibleModels: ["gpt-luna"],
+    compatibleModels: ["gpt-4o", "gpt-4o-mini"],
     builtIn: true,
   },
   {
