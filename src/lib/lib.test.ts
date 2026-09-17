@@ -26,6 +26,18 @@ import {
 } from "./generation-core";
 import { describeElement, formatElementContext, pickedElementPrompt } from "./element-context";
 import {
+  API_DOCS,
+  API_KEY_PREFIX,
+  MAX_PROMPT_CHARS,
+  corsHeaders,
+  generateApiKey,
+  isApiKeyShaped,
+  jsonResponse,
+  maskApiKey,
+  parseBearer,
+  parseGenerateBody,
+} from "./public-api";
+import {
   detectPatterns,
   formatUserPatterns,
   mergePatterns,
@@ -1083,5 +1095,112 @@ describe("explained changes", () => {
     );
     expect(broken.changes).toEqual([]);
     expect(broken.failed.length).toBe(1);
+  });
+});
+
+/* ------------------------- public API keys ----------------------------- */
+
+describe("public API keys", () => {
+  test("generated keys are prefixed and never repeat", () => {
+    const first = generateApiKey();
+    const second = generateApiKey();
+    expect(first.startsWith(API_KEY_PREFIX)).toBe(true);
+    expect(first.length).toBe(API_KEY_PREFIX.length + 48);
+    expect(first).not.toBe(second);
+    expect(isApiKeyShaped(first)).toBe(true);
+  });
+
+  test("only well-formed keys are accepted", () => {
+    const key = generateApiKey();
+    expect(isApiKeyShaped(key)).toBe(true);
+    expect(isApiKeyShaped("rbr_short")).toBe(false);
+    expect(isApiKeyShaped(key.toUpperCase())).toBe(false);
+    expect(isApiKeyShaped(`${key.slice(0, -1)}z`)).toBe(false);
+  });
+
+  test("the displayed form hides the secret", () => {
+    const key = generateApiKey();
+    const masked = maskApiKey(key);
+    expect(masked).toContain(key.slice(0, 8));
+    expect(masked).not.toContain(key.slice(10, 30));
+    expect(maskApiKey("short")).toBe("shor…");
+  });
+});
+
+describe("bearer parsing", () => {
+  test("accepts the standard header, case-insensitively", () => {
+    const key = generateApiKey();
+    expect(parseBearer(`Bearer ${key}`)).toBe(key);
+    expect(parseBearer(`bearer ${key}`)).toBe(key);
+    expect(parseBearer(` Bearer   ${key}  `)).toBe(key);
+  });
+
+  test("rejects other schemes and malformed tokens", () => {
+    expect(parseBearer(null)).toBe(null);
+    expect(parseBearer("")).toBe(null);
+    expect(parseBearer(`Basic ${generateApiKey()}`)).toBe(null);
+    expect(parseBearer("Bearer not-a-key")).toBe(null);
+    expect(parseBearer(`Bearer ${generateApiKey()} extra`)).toBe(null);
+  });
+});
+
+describe("generate request body", () => {
+  test("needs a prompt and trims it", () => {
+    const result = parseGenerateBody({ prompt: "  CRM для стоматологии  " });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.prompt).toBe("CRM для стоматологии");
+      expect(result.value.deploy).toBe(false);
+      expect(result.value.model).toBe(undefined);
+    }
+
+    const missing = parseGenerateBody({});
+    expect(missing.ok).toBe(false);
+  });
+
+  test("rejects non-objects and oversized prompts", () => {
+    expect(parseGenerateBody(null).ok).toBe(false);
+    expect(parseGenerateBody(["prompt"]).ok).toBe(false);
+    expect(parseGenerateBody("prompt=hi").ok).toBe(false);
+    expect(parseGenerateBody({ prompt: "a".repeat(MAX_PROMPT_CHARS + 1) }).ok).toBe(false);
+  });
+
+  test("validates optional fields instead of trusting them", () => {
+    const prompt = "CRM для туров";
+    expect(parseGenerateBody({ prompt, model: 5 }).ok).toBe(false);
+    expect(parseGenerateBody({ prompt, deploy: "yes" }).ok).toBe(false);
+    expect(parseGenerateBody({ prompt, project: "x".repeat(200) }).ok).toBe(false);
+
+    const full = parseGenerateBody({
+      prompt,
+      model: " deepseek-chat ",
+      project: " smile-crm ",
+      deploy: true,
+    });
+    expect(full.ok).toBe(true);
+    if (full.ok) {
+      expect(full.value).toEqual({
+        prompt,
+        model: "deepseek-chat",
+        project: "smile-crm",
+        deploy: true,
+      });
+    }
+  });
+});
+
+describe("HTTP helpers", () => {
+  test("responses are JSON with CORS enabled", async () => {
+    const response = jsonResponse({ ok: true }, 201);
+    expect(response.status).toBe(201);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(await response.json()).toEqual({ ok: true });
+    expect(corsHeaders()["Access-Control-Allow-Headers"]).toContain("Authorization");
+  });
+
+  test("documented endpoints stay stable", () => {
+    expect(API_DOCS.generate.path).toBe("/v1/generate");
+    expect(API_DOCS.models.path).toBe("/v1/models");
+    expect(JSON.parse(API_DOCS.generate.body).prompt.length).toBeGreaterThan(10);
   });
 });

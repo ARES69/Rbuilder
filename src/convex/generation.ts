@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action } from "./_generated/server";
+import { action, internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { getModel, getProvider } from "../lib/models";
 import {
@@ -47,6 +47,27 @@ interface TraceEntry {
 interface Usage {
   promptTokens: number;
   completionTokens: number;
+}
+
+/**
+ * What a build returns. Declared explicitly so the public action and the shared
+ * pipeline do not type each other in a circle (TS7022).
+ */
+export interface GenerationResult {
+  html: string;
+  files?: GeneratedFile[];
+  demo: boolean;
+  /** Present on the demo path: why the selected model could not be used. */
+  notice?: string;
+  trace: TraceEntry[];
+  changes?: FileChange[];
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    costRub: number | null;
+    provider: string;
+    apiModel: string;
+  };
 }
 
 interface Target {
@@ -261,26 +282,39 @@ function apiModelFor(provider: string, apiModel: string): string {
   return apiModel;
 }
 
-export const run = action({
+const generationArgs = {
+  prompt: v.string(),
+  modelId: v.optional(v.string()),
+  architectureId: v.optional(v.string()),
+  projectId: v.optional(v.id("projects")),
+  previousHtml: v.optional(v.string()),
+  /** Canonical source of the current code — preferred over `previousHtml`. */
+  previousFiles: previousFilesValidator,
+  attachmentIds: v.optional(v.array(v.id("attachments"))),
+  /** Enabled skill prompt modules (from the Skills tab). */
+  skillPrompts: v.optional(v.array(v.string())),
+  /** Enabled tool ids (from the Tools tab). */
+  toolIds: v.optional(v.array(v.string())),
+  /** Agent run row to stream progress into (from the Workspaces panel). */
+  runId: v.optional(v.id("agentRuns")),
+};
+
+/**
+ * The pipeline, for an explicit user.
+ *
+ * The session-based action below and the public API both funnel through here,
+ * so an API key gets exactly the same pipeline, limits and accounting as the
+ * signed-in UI — no second implementation to keep in sync.
+ */
+export const runForUser = internalAction({
   args: {
-    prompt: v.string(),
-    modelId: v.optional(v.string()),
-    architectureId: v.optional(v.string()),
-    projectId: v.optional(v.id("projects")),
-    previousHtml: v.optional(v.string()),
-    /** Canonical source of the current code — preferred over `previousHtml`. */
-    previousFiles: previousFilesValidator,
-    attachmentIds: v.optional(v.array(v.id("attachments"))),
-    /** Enabled skill prompt modules (from the Skills tab). */
-    skillPrompts: v.optional(v.array(v.string())),
-    /** Enabled tool ids (from the Tools tab). */
-    toolIds: v.optional(v.array(v.string())),
-    /** Agent run row to stream progress into (from the Workspaces panel). */
-    runId: v.optional(v.id("agentRuns")),
+    userId: v.id("users"),
+    ...generationArgs,
   },
   handler: async (
     ctx,
     {
+      userId,
       prompt,
       modelId,
       architectureId,
@@ -292,9 +326,9 @@ export const run = action({
       toolIds,
       runId,
     },
-  ) => {
-    const user = await ctx.runQuery(api.users.currentUser);
-    if (!user) throw new Error("Not authenticated");
+  ): Promise<GenerationResult> => {
+    const user = await ctx.runQuery(internal.users.getById, { userId });
+    if (!user) throw new Error("Пользователь не найден");
 
     const model = getModel(modelId);
     const provider = getProvider(model.provider);
@@ -690,5 +724,18 @@ export const run = action({
         apiModel,
       },
     };
+  },
+});
+
+/** Session-based entry point used by the app UI. */
+export const run = action({
+  args: generationArgs,
+  handler: async (ctx, args): Promise<GenerationResult> => {
+    const user = await ctx.runQuery(api.users.currentUser);
+    if (!user) throw new Error("Not authenticated");
+    return await ctx.runAction(internal.generation.runForUser, {
+      userId: user._id,
+      ...args,
+    });
   },
 });

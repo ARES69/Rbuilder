@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { getCurrentUser } from "./users";
 
 export const list = query({
@@ -39,6 +39,26 @@ export const create = mutation({
       userId: user._id,
       name,
       description: "",
+      version: 0,
+      lastPrompt: prompt,
+      model,
+    });
+  },
+});
+
+/** Creation on behalf of a known owner — used by the public API. */
+export const createForUser = internalMutation({
+  args: {
+    userId: v.id("users"),
+    name: v.string(),
+    prompt: v.optional(v.string()),
+    model: v.optional(v.string()),
+  },
+  handler: async (ctx, { userId, name, prompt, model }) => {
+    return await ctx.db.insert("projects", {
+      userId,
+      name: name.slice(0, 120) || "API app",
+      description: "Создано через публичный API",
       version: 0,
       lastPrompt: prompt,
       model,

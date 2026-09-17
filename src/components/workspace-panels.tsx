@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { KEYLESS_LABEL } from "@/lib/research";
+import { PublicApiPanel } from "./public-api-panel";
 import { toast } from "sonner";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -33,6 +34,7 @@ import {
 } from "lucide-react";
 
 export { IntegrationsPanel } from "./integrations-panel";
+export { PublicApiPanel } from "./public-api-panel";
 
 /* ------------------------------ Code panel ------------------------------ */
 
@@ -463,6 +465,7 @@ export function ApiKeysPanel() {
             </div>
           ))}
         </div>
+        <PublicApiPanel />
       </div>
     </div>
   );

@@ -186,6 +186,22 @@ const schema = defineSchema(
       .index("by_user", ["userId"])
       .index("by_user_kind", ["userId", "kind"]),
 
+    // Public API keys. Only a hash is stored; the plaintext is shown once at
+    // creation and never leaves the client again.
+    apiKeys: defineTable({
+      userId: v.id("users"),
+      name: v.string(),
+      /** First characters of the key, for the UI list. */
+      prefix: v.string(),
+      hash: v.string(),
+      requestCount: v.number(),
+      lastUsedAt: v.optional(v.number()),
+      createdAt: v.number(),
+      revokedAt: v.optional(v.number()),
+    })
+      .index("by_user", ["userId"])
+      .index("by_hash", ["hash"]),
+
     // Published apps. A deployment is the shareable artefact of a project:
     // a stable slug served over HTTP, plus its visit count.
     deployments: defineTable({

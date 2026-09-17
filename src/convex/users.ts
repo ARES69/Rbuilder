@@ -1,5 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { query, QueryCtx } from "./_generated/server";
+import { v } from "convex/values";
+import { internalQuery, query, QueryCtx } from "./_generated/server";
 
 /**
  * Get the current signed in user. Returns null if the user is not signed in.
@@ -24,6 +25,17 @@ export const currentUser = query({
  * @param ctx
  * @returns
  */
+/**
+ * Look a user up by id. Used by server-side entry points that have no browser
+ * session of their own — the public API authenticates with a key instead.
+ */
+export const getById = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    return await ctx.db.get(userId);
+  },
+});
+
 export const getCurrentUser = async (ctx: QueryCtx) => {
   const userId = await getAuthUserId(ctx);
   if (userId === null) {

@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { getCurrentUser } from "./users";
 import { isValidSlug, slugify } from "../lib/deploy";
 
@@ -22,6 +23,67 @@ async function ownedProject(
   const project = await ctx.db.get(projectId);
   if (!project || project.userId !== user._id) return null;
   return project;
+}
+
+/**
+ * Publish for an explicit owner. Shared by the session mutation below and by
+ * the public API, so both get the same slug rules.
+ */
+async function publishForOwner(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  args: { projectId: Id<"projects">; slug?: string; title?: string },
+) {
+  const project = await ctx.db.get(args.projectId);
+  if (!project || project.userId !== userId) throw new Error("Проект не найден");
+  if (!project.html) {
+    throw new Error("Сначала соберите приложение — публиковать нечего.");
+  }
+
+  const requested = args.slug?.trim().toLowerCase();
+  if (requested && !isValidSlug(requested)) {
+    throw new Error(
+      "Адрес может содержать только латинские буквы, цифры и дефис (3–40 символов).",
+    );
+  }
+
+  const finalSlug = await availableSlug(
+    ctx,
+    requested && isValidSlug(requested) ? requested : slugify(project.name),
+    args.projectId,
+  );
+
+  const existing = await ctx.db
+    .query("deployments")
+    .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+    .unique();
+
+  const now = Date.now();
+  const nextTitle = (args.title?.trim() || project.name).slice(0, 80);
+  const version = project.version ?? 0;
+
+  if (existing) {
+    // Keep `visits` and `publishedAt`: the link did not change.
+    await ctx.db.patch(existing._id, {
+      slug: finalSlug,
+      title: nextTitle,
+      version,
+      updatedAt: now,
+    });
+    return { slug: finalSlug, version, deploymentId: existing._id };
+  }
+
+  const deploymentId = await ctx.db.insert("deployments", {
+    projectId: args.projectId,
+    userId,
+    slug: finalSlug,
+    title: nextTitle,
+    version,
+    visits: 0,
+    publishedAt: now,
+    updatedAt: now,
+  });
+  return { slug: finalSlug, version, deploymentId };
 }
 
 /** Make `candidate` unique by suffixing -2, -3, … */
@@ -54,57 +116,23 @@ export const publish = mutation({
     slug: v.optional(v.string()),
     title: v.optional(v.string()),
   },
-  handler: async (ctx, { projectId, slug, title }) => {
-    const project = await ownedProject(ctx, projectId);
-    if (!project) throw new Error("Проект не найден");
-    if (!project.html) {
-      throw new Error("Сначала соберите приложение — публиковать нечего.");
-    }
+  handler: async (ctx, args) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) throw new Error("Not authenticated");
+    return await publishForOwner(ctx, user._id, args);
+  },
+});
 
-    const requested = slug?.trim().toLowerCase();
-    if (requested && !isValidSlug(requested)) {
-      throw new Error(
-        "Адрес может содержать только латинские буквы, цифры и дефис (3–40 символов).",
-      );
-    }
-
-    const finalSlug = await availableSlug(
-      ctx,
-      requested && isValidSlug(requested) ? requested : slugify(project.name),
-      projectId,
-    );
-
-    const existing = await ctx.db
-      .query("deployments")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .unique();
-
-    const now = Date.now();
-    const nextTitle = (title?.trim() || project.name).slice(0, 80);
-    const version = project.version ?? 0;
-
-    if (existing) {
-      // Keep `visits` and `publishedAt`: the link did not change.
-      await ctx.db.patch(existing._id, {
-        slug: finalSlug,
-        title: nextTitle,
-        version,
-        updatedAt: now,
-      });
-      return { slug: finalSlug, version, deploymentId: existing._id };
-    }
-
-    const deploymentId = await ctx.db.insert("deployments", {
-      projectId,
-      userId: project.userId,
-      slug: finalSlug,
-      title: nextTitle,
-      version,
-      visits: 0,
-      publishedAt: now,
-      updatedAt: now,
-    });
-    return { slug: finalSlug, version, deploymentId };
+/** Publishing for a caller that already knows the owner (public API). */
+export const publishForUser = internalMutation({
+  args: {
+    userId: v.id("users"),
+    projectId: v.id("projects"),
+    slug: v.optional(v.string()),
+    title: v.optional(v.string()),
+  },
+  handler: async (ctx, { userId, ...args }) => {
+    return await publishForOwner(ctx, userId, args);
   },
 });
 

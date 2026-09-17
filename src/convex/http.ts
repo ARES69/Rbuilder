@@ -2,6 +2,17 @@ import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { auth } from "./auth";
+import { decideRateLimit } from "./usage";
+import { DAY_MS, HOUR_MS } from "../lib/generation-core";
+import { MODELS, getModel } from "../lib/models";
+import { publishUrl, siteBaseUrl } from "../lib/deploy";
+import {
+  corsHeaders,
+  hashApiKey,
+  jsonResponse,
+  parseBearer,
+  parseGenerateBody,
+} from "../lib/public-api";
 
 const http = httpRouter();
 
@@ -148,6 +159,208 @@ http.route({
       JSON.stringify({ ok: true, serviceId: connection.serviceId }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
+  }),
+});
+
+/* ------------------------------- public API ------------------------------- */
+
+/**
+ * Bearer-key authentication for the public API.
+ *
+ * An API key identifies an account, never a browser session: the request runs
+ * the same pipeline as the UI, with the same limits and accounting, and can
+ * only ever touch projects owned by the key's account.
+ */
+async function authenticate(ctx: Parameters<Parameters<typeof httpAction>[0]>[0], request: Request) {
+  const token = parseBearer(request.headers.get("authorization"));
+  if (!token) return { error: "Нужен заголовок Authorization: Bearer rbr_…" };
+  const hash = await hashApiKey(token);
+  const key = await ctx.runQuery(internal.apiKeys.verifyByHash, { hash });
+  if (!key) return { error: "Ключ не найден или отозван." };
+  return { key };
+}
+
+http.route({
+  path: "/v1/generate",
+  method: "OPTIONS",
+  handler: httpAction(async () => new Response(null, { status: 204, headers: corsHeaders() })),
+});
+
+http.route({
+  path: "/v1/generate",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await authenticate(ctx, request);
+    if ("error" in auth) return jsonResponse({ ok: false, error: auth.error }, 401);
+    const { key } = auth;
+
+    let raw: unknown;
+    try {
+      raw = await request.json();
+    } catch {
+      return jsonResponse({ ok: false, error: "Тело запроса должно быть JSON." }, 400);
+    }
+    const parsed = parseGenerateBody(raw);
+    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const body = parsed.value;
+
+    if (body.model && !MODELS.some((model) => model.id === body.model)) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: `Неизвестная модель: ${body.model}`,
+          models: MODELS.map((model) => model.id),
+        },
+        400,
+      );
+    }
+
+    // Same guardrails as the UI: a leaked key must not be able to burn quota.
+    const now = Date.now();
+    const [lastHour, lastDay] = await Promise.all([
+      ctx.runQuery(internal.usage.countSince, { userId: key.userId, since: now - HOUR_MS }),
+      ctx.runQuery(internal.usage.countSince, { userId: key.userId, since: now - DAY_MS }),
+    ]);
+    const verdict = decideRateLimit({
+      isAnonymous: key.isAnonymous,
+      lastHour,
+      lastDay,
+    });
+    if (!verdict.allowed) {
+      return jsonResponse({ ok: false, error: verdict.reason }, 429);
+    }
+
+    const model = getModel(body.model);
+    const projectName =
+      body.project?.trim().slice(0, 80) || body.prompt.trim().slice(0, 60);
+
+    try {
+      const projectId = await ctx.runMutation(internal.projects.createForUser, {
+        userId: key.userId,
+        name: projectName,
+        prompt: body.prompt,
+        model: model.id,
+      });
+
+      const result = await ctx.runAction(internal.generation.runForUser, {
+        userId: key.userId,
+        projectId,
+        prompt: body.prompt,
+        modelId: model.id,
+      });
+
+      await ctx.runMutation(internal.builds.commitForUser, {
+        userId: key.userId,
+        projectId,
+        html: result.html,
+        demo: result.demo,
+        trace: result.trace,
+        changes: result.changes,
+        files: result.files?.length
+          ? result.files
+          : [{ path: "index.html", content: result.html, language: "html" }],
+      });
+
+      if (result.demo) {
+        return jsonResponse(
+          {
+            ok: false,
+            error:
+              result.notice ??
+              "Выбранная модель недоступна: не настроен ключ провайдера.",
+            projectId,
+            model: model.id,
+          },
+          402,
+        );
+      }
+
+      let url: string | null = null;
+      if (body.deploy) {
+        const published = await ctx.runMutation(internal.deployments.publishForUser, {
+          userId: key.userId,
+          projectId,
+          slug: body.project?.trim() || undefined,
+          title: projectName,
+        });
+        url = publishUrl(published.slug, process.env.CONVEX_SITE_URL ?? undefined);
+      }
+
+      await ctx.runMutation(internal.apiKeys.touch, { keyId: key.keyId });
+
+      return jsonResponse({
+        ok: true,
+        projectId,
+        version: result.demo ? 0 : 1,
+        model: model.id,
+        apiModel: result.usage.apiModel,
+        url,
+        tokens: result.usage.promptTokens + result.usage.completionTokens,
+        costRub: result.usage.costRub,
+        changes: result.changes ?? [],
+      });
+    } catch (error) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: error instanceof Error ? error.message : "Генерация не удалась.",
+        },
+        500,
+      );
+    }
+  }),
+});
+
+http.route({
+  path: "/v1/models",
+  method: "OPTIONS",
+  handler: httpAction(async () => new Response(null, { status: 204, headers: corsHeaders() })),
+});
+
+http.route({
+  path: "/v1/models",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await authenticate(ctx, request);
+    if ("error" in auth) return jsonResponse({ ok: false, error: auth.error }, 401);
+    return jsonResponse({
+      ok: true,
+      models: MODELS.map((model) => ({
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        apiModel: model.apiModel,
+        costsSession: model.costsSession,
+      })),
+    });
+  }),
+});
+
+http.route({
+  path: "/v1/me",
+  method: "OPTIONS",
+  handler: httpAction(async () => new Response(null, { status: 204, headers: corsHeaders() })),
+});
+
+http.route({
+  path: "/v1/me",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await authenticate(ctx, request);
+    if ("error" in auth) return jsonResponse({ ok: false, error: auth.error }, 401);
+    const { key } = auth;
+    const now = Date.now();
+    const [lastHour, lastDay] = await Promise.all([
+      ctx.runQuery(internal.usage.countSince, { userId: key.userId, since: now - HOUR_MS }),
+      ctx.runQuery(internal.usage.countSince, { userId: key.userId, since: now - DAY_MS }),
+    ]);
+    return jsonResponse({
+      ok: true,
+      keyName: key.keyName,
+      site: siteBaseUrl(process.env.CONVEX_SITE_URL ?? undefined),
+      generationsLastHour: lastHour,
+      generationsLastDay: lastDay,
+    });
   }),
 });
 
