@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { MODELS, getModel, DEFAULT_MODEL_ID, DAILY_SESSION_LIMIT } from "./models";
 import {
+  EXPO_PREVIEW_PATH,
+  EXPO_REQUIRED_PATHS,
+  isExpoProject,
+  orderExpoFiles,
+} from "./generation-core";
+import {
   LOCAL_PRESETS,
   isLocalUrl,
   localChatUrl,
@@ -1283,5 +1289,40 @@ describe("local-model bridge helpers", () => {
     for (const preset of LOCAL_PRESETS) {
       expect(isLocalUrl(preset.url)).toBe(true);
     }
+  });
+});
+
+describe("Expo target helpers", () => {
+  test("orderExpoFiles sinks the preview below RN sources", () => {
+    const ordered = orderExpoFiles([
+      { path: "preview.html" },
+      { path: "package.json" },
+      { path: "app/index.tsx" },
+      { path: "app/_layout.tsx" },
+      { path: "README.md" },
+    ]);
+    expect(ordered[ordered.length - 1].path).toBe(EXPO_PREVIEW_PATH);
+    expect(ordered.filter((file) => file.path.startsWith("app/")).length).toBe(2);
+    expect(ordered[0].path.startsWith("app/")).toBe(true);
+  });
+
+  test("isExpoProject requires the runnable core files", () => {
+    expect(
+      isExpoProject(EXPO_REQUIRED_PATHS.map((path) => ({ path }))),
+    ).toBe(true);
+    expect(isExpoProject([{ path: "package.json" }, { path: "app/index.tsx" }])).toBe(false);
+    expect(isExpoProject([{ path: "index.html" }])).toBe(false);
+  });
+
+  test("isExpoProject tolerates extra files and reordering", () => {
+    expect(
+      isExpoProject([
+        { path: "app/_layout.tsx" },
+        { path: "assets/hero.png" },
+        { path: "app.json" },
+        { path: "app/index.tsx" },
+        { path: "package.json" },
+      ]),
+    ).toBe(true);
   });
 });

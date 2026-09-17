@@ -89,6 +89,8 @@ const schema = defineSchema(
       version: v.number(),
       lastPrompt: v.optional(v.string()),
       model: v.optional(v.string()), // selected model id from the catalog
+      /** Output target: "web" (default) or "expo" (React Native sources). */
+      target: v.optional(v.union(v.literal("web"), v.literal("expo"))),
     }).index("by_user", ["userId"]),
 
     messages: defineTable({

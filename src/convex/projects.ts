@@ -31,8 +31,9 @@ export const create = mutation({
     name: v.string(),
     prompt: v.optional(v.string()),
     model: v.optional(v.string()),
+    target: v.optional(v.union(v.literal("web"), v.literal("expo"))),
   },
-  handler: async (ctx, { name, prompt, model }) => {
+  handler: async (ctx, { name, prompt, model, target }) => {
     const user = await getCurrentUser(ctx);
     if (!user) throw new Error("Not authenticated");
     return await ctx.db.insert("projects", {
@@ -42,6 +43,7 @@ export const create = mutation({
       version: 0,
       lastPrompt: prompt,
       model,
+      ...(target ? { target } : {}),
     });
   },
 });
@@ -74,6 +76,21 @@ export const setModel = mutation({
     const project = await ctx.db.get(projectId);
     if (!project || project.userId !== user._id) throw new Error("Not found");
     await ctx.db.patch(projectId, { model });
+  },
+});
+
+/** Switch the output target of an existing project (web ↔ expo). */
+export const setTarget = mutation({
+  args: {
+    projectId: v.id("projects"),
+    target: v.union(v.literal("web"), v.literal("expo")),
+  },
+  handler: async (ctx, { projectId, target }) => {
+    const user = await getCurrentUser(ctx);
+    if (!user) throw new Error("Not authenticated");
+    const project = await ctx.db.get(projectId);
+    if (!project || project.userId !== user._id) throw new Error("Not found");
+    await ctx.db.patch(projectId, { target });
   },
 });
 

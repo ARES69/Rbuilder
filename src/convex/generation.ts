@@ -13,6 +13,8 @@ import {
 import {
   DAY_MS,
   EDIT_PROMPT,
+  EXPO_BUILD_PROMPT,
+  EXPO_PREVIEW_PATH,
   HOUR_MS,
   MAX_REVIEW_ROUNDS,
   REVIEW_PROMPT,
@@ -22,7 +24,9 @@ import {
   parseEditResponse,
   extractProjectFiles,
   formatProjectContext,
+  isExpoProject,
   isRetryableStatus,
+  orderExpoFiles,
   parseReview,
   selectRelevantFiles,
   truncate,
@@ -373,6 +377,8 @@ const generationArgs = {
   prompt: v.string(),
   modelId: v.optional(v.string()),
   architectureId: v.optional(v.string()),
+  /** Output target: web (default) or expo (React Native sources). */
+  target: v.optional(v.union(v.literal("web"), v.literal("expo"))),
   projectId: v.optional(v.id("projects")),
   previousHtml: v.optional(v.string()),
   /** Canonical source of the current code — preferred over `previousHtml`. */
@@ -405,6 +411,7 @@ export const runForUser = internalAction({
       prompt,
       modelId,
       architectureId,
+      target: targetArg,
       projectId,
       previousHtml,
       previousFiles,
@@ -416,6 +423,13 @@ export const runForUser = internalAction({
   ): Promise<GenerationResult> => {
     const user = await ctx.runQuery(internal.users.getById, { userId });
     if (!user) throw new Error("Пользователь не найден");
+
+    // Target: explicit argument wins, else the project's stored choice.
+    const storedTarget = projectId
+      ? (await ctx.runQuery(api.projects.get, { projectId }))?.target
+      : undefined;
+    const buildTarget = targetArg ?? storedTarget ?? "web";
+    const isExpo = buildTarget === "expo";
 
     const model = getModel(modelId);
     const provider = getProvider(model.provider);
@@ -670,6 +684,7 @@ export const runForUser = internalAction({
       editable: GeneratedFile[],
     ): Promise<{ files: GeneratedFile[]; note: string }> => {
       const system = `${contract}${skillsBlock}${toolsBlock}${patternsBlock}`;
+      const buildPrompt = isExpo ? EXPO_BUILD_PROMPT : BUILD_PROMPT;
       if (editable.length > 0) {
         const editRaw = await call(`${EDIT_PROMPT}\n\n${system}`, input, 16000, {
           json: true,
@@ -689,7 +704,7 @@ export const runForUser = internalAction({
           }
         }
       }
-      const raw = await call(`${BUILD_PROMPT}\n\n${system}`, input, 16000);
+      const raw = await call(`${buildPrompt}\n\n${system}`, input, 16000);
       return {
         files: extractProjectFiles(raw),
         note: editable.length > 0 ? "полная пересборка" : "проект собран",
@@ -719,7 +734,9 @@ export const runForUser = internalAction({
     let files = built.files
       .map((file) => ({ ...file, path: file.path.trim().replace(/^\/+/, "") }))
       .filter((file) => file.path && !file.path.includes(".."));
-    let html = files.find((file) => file.path === "index.html")?.content ?? "";
+    // Expo builds preview through their HTML approximation, not index.html.
+    const previewPath = isExpo ? EXPO_PREVIEW_PATH : "index.html";
+    let html = files.find((file) => file.path === previewPath)?.content ?? "";
     if (!html) {
       throw new Error("Модель вернула пустой ответ. Попробуйте ещё раз.");
     }
@@ -750,7 +767,7 @@ export const runForUser = internalAction({
         ].join("\n\n");
         const repaired = await produceFiles(fixInput, files);
         const repairedHtml =
-          repaired.files.find((file) => file.path === "index.html")?.content ?? "";
+          repaired.files.find((file) => file.path === previewPath)?.content ?? "";
         if (repairedHtml && repairedHtml !== html) {
           html = repairedHtml;
           files = repaired.files;
@@ -801,10 +818,10 @@ export const runForUser = internalAction({
 
     return {
       html: truncate(html, MAX_HTML_CHARS),
-      files: files.map((file) => ({
+      files: (isExpo ? orderExpoFiles(files) : files).map((file) => ({
         ...file,
         content:
-          file.path === "index.html"
+          file.path === previewPath
             ? truncate(file.content, MAX_HTML_CHARS)
             : file.content,
       })),

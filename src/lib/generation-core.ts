@@ -454,6 +454,60 @@ export function countWithinWindow(
 export const HOUR_MS = 60 * 60 * 1000;
 export const DAY_MS = 24 * HOUR_MS;
 
+/* -------------------------------- Expo target ------------------------------ */
+
+/**
+ * The Expo output target.
+ *
+ * The model writes real Expo Router source (React Native) instead of a web
+ * bundle, but the preview surface in RBuilder is a browser. So a build also
+ * produces `preview.html` — a static, self-contained approximation of the
+ * app's first screen — which is what the phone-frame preview renders. The RN
+ * sources remain the canonical output for `npx expo start`.
+ */
+export const EXPO_BUILD_PROMPT = `You are RBuilder, an expert mobile app builder targeting Expo (React Native + Expo Router). Return a complete working project as a JSON file manifest.
+
+STRICT OUTPUT RULES:
+1. Output ONLY valid JSON. No markdown fences, no explanation, no commentary.
+2. Shape: {"files":[{"path":"app/index.tsx","content":"...","language":"tsx"}]}
+3. REQUIRED files for a runnable Expo project: package.json (expo ~52, react-native, expo-router, react, react-dom, react-native-safe-area-context, react-native-screens; scripts: start/android/ios/web), app.json (expo config with name, slug, scheme), app/_layout.tsx (Stack from expo-router), app/index.tsx as the entry screen.
+4. Write idiomatic React Native: View/Text/Pressable/FlatList/StyleSheet from react-native — never div/span/CSS. Navigation via expo-router (Link or useRouter). Keep all state local (useState) and seed with realistic data. Never leave stubs.
+5. Styling via StyleSheet.create: intentional typography, spacing, a restrained palette, comfortable touch targets (min 44px), SafeAreaView.
+6. ALSO include preview.html: a complete, self-contained HTML document that faithfully approximates the app's main screen (same layout, palette, data) using plain HTML/CSS. It is used only for the web preview; wrap content in a max-width 390px column so it reads like a phone screen.
+
+If previous files are provided, treat them as the current code and change only what the plan requires, keeping everything else byte-identical.`;
+
+/** The path of the web-preview approximation of an Expo build. */
+export const EXPO_PREVIEW_PATH = "preview.html";
+
+/** Paths every Expo project must contain to be considered runnable. */
+export const EXPO_REQUIRED_PATHS = [
+  "package.json",
+  "app.json",
+  "app/_layout.tsx",
+  "app/index.tsx",
+] as const;
+
+/**
+ * Files an Expo build should show first in the Code panel: RN sources lead,
+ * the HTML approximation sinks below them.
+ */
+export function orderExpoFiles<T extends { path: string }>(files: T[]): T[] {
+  const score = (path: string): number => {
+    if (path === EXPO_PREVIEW_PATH) return 200;
+    if (path.startsWith("app/")) return 0;
+    if (path === "package.json" || path === "app.json") return 10;
+    return 50;
+  };
+  return [...files].sort((a, b) => score(a.path) - score(b.path));
+}
+
+/** True when the file manifest looks like an Expo project. */
+export function isExpoProject(files: Array<{ path: string }>): boolean {
+  const paths = new Set(files.map((file) => file.path));
+  return EXPO_REQUIRED_PATHS.every((required) => paths.has(required));
+}
+
 export function rateLimitError(): string {
   return `Слишком много генераций. Лимит — ${RATE_LIMITS.perUserPerHour} в час. Подождите немного и повторите.`;
 }

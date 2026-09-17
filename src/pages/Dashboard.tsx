@@ -9,6 +9,7 @@ import {
 } from "@/components/app-sidebar";
 import { ModelPicker, useSessionStatus } from "@/components/model-picker";
 import { getModel, DAILY_SESSION_LIMIT } from "@/lib/models";
+import { EXPO_PREVIEW_PATH } from "@/lib/generation-core";
 import { ARCHITECTURES, DEFAULT_ARCHITECTURE_ID } from "@/lib/architecture";
 import { SNIPPETS, SNIPPET_CATEGORIES } from "@/lib/snippets";
 import {
@@ -86,6 +87,7 @@ import {
   Loader2,
   LogOut,
   Monitor,
+  Smartphone,
   PanelLeft,
   Rocket,
 
@@ -204,6 +206,27 @@ export default function Dashboard() {
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages?.length, generating]);
+
+  // The composer target follows the selected project once it loads. Derived
+  // during render (no effect): when the effective project changes, adopt its
+  // stored target; the user's in-flight choice applies only to the same project.
+  const projectTarget = projectDetail?.target ?? "web";
+  const [targetOwner, setTargetOwner] = useState<Id<"projects"> | null>(null);
+  const [composerTarget, setComposerTarget] = useState<"web" | "expo">("web");
+  if (effectiveProjectId && effectiveProjectId !== targetOwner) {
+    setTargetOwner(effectiveProjectId);
+    setComposerTarget(projectTarget);
+  }
+
+  // Expo projects preview in a phone frame. Determined by the stored target
+  // or, for legacy builds, by the presence of the generated preview.html.
+  const projectFiles = useQuery(
+    api.projectFiles.list,
+    effectiveProjectId ? { projectId: effectiveProjectId } : "skip",
+  );
+  const isExpoPreview =
+    projectTarget === "expo" ||
+    (projectFiles?.some((file) => file.path === EXPO_PREVIEW_PATH) ?? false);
 
   /**
    * Stage a picture of the picked element as an attachment.
@@ -344,6 +367,7 @@ export default function Dashboard() {
   const startAgentRun = useMutation(api.workspaces.startRun);
   const finishAgentRun = useMutation(api.workspaces.finishRun);
   const setModelMutation = useMutation(api.projects.setModel);
+  const setTargetMutation = useMutation(api.projects.setTarget);
   const forgetPattern = useMutation(api.patterns.forget);
   const clearPatterns = useMutation(api.patterns.clear);
   const publishDeployment = useMutation(api.deployments.publish);
@@ -512,6 +536,7 @@ export default function Dashboard() {
         prompt: request,
         modelId: model.id,
         architectureId,
+        target: composerTarget,
         projectId,
         runId: runId ?? undefined,
         previousHtml: previous?.html ?? undefined,
@@ -925,6 +950,31 @@ export default function Dashboard() {
             >
               <Layers3 className="size-3.5" />
               Архитектура
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-8 gap-1.5 text-muted-foreground",
+                composerTarget === "expo" && "text-foreground",
+              )}
+              onClick={() => {
+                const next = composerTarget === "expo" ? "web" : "expo";
+                setComposerTarget(next);
+                if (effectiveProjectId) {
+                  void setTargetMutation({ projectId: effectiveProjectId, target: next });
+                }
+              }}
+              disabled={generating}
+              title={
+                composerTarget === "expo"
+                  ? "Expo (React Native): сборка генерирует app/ + npx expo start. Превью — в рамке телефона."
+                  : "Переключить на Expo (React Native): получите исходники мобильного приложения."
+              }
+            >
+              <Smartphone className="size-3.5" />
+              Expo
             </Button>
             <Button
               type="button"
@@ -1442,17 +1492,34 @@ export default function Dashboard() {
 
       <div className="min-h-0 flex-1 bg-muted/30 p-4">
         {selectedProject?.html ? (
-          <iframe
-            key={previewKey}
-            title="App preview"
-            srcDoc={selectedProject.html}
-            sandbox="allow-scripts allow-forms allow-modals allow-popups"
-            data-rbuilder-preview="true"
-            className={cn(
-              "h-full w-full rounded-md border border-border/70 bg-white",
-              selectingPreviewElement && "cursor-crosshair",
-            )}
-          />
+          isExpoPreview ? (
+            <div className="flex h-full items-center justify-center">
+              <div
+                className="flex h-full max-h-[720px] w-[390px] max-w-full flex-col overflow-hidden rounded-[2rem] border-[10px] border-neutral-900 bg-white shadow-xl dark:border-neutral-700"
+              >
+                <iframe
+                  key={previewKey}
+                  title="App preview (mobile)"
+                  srcDoc={selectedProject.html}
+                  sandbox="allow-scripts allow-forms allow-modals allow-popups"
+                  data-rbuilder-preview="true"
+                  className="h-full w-full bg-white"
+                />
+              </div>
+            </div>
+          ) : (
+            <iframe
+              key={previewKey}
+              title="App preview"
+              srcDoc={selectedProject.html}
+              sandbox="allow-scripts allow-forms allow-modals allow-popups"
+              data-rbuilder-preview="true"
+              className={cn(
+                "h-full w-full rounded-md border border-border/70 bg-white",
+                selectingPreviewElement && "cursor-crosshair",
+              )}
+            />
+          )
         ) : (
           <div className="flex h-full flex-col items-center justify-center rounded-md border border-dashed border-border/80">
             <Monitor className="size-5 text-muted-foreground/60" />
