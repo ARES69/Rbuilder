@@ -71,6 +71,11 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # Regenerate Convex type bindings so the build never depends on stale
+      # committed bindings or runner caches.
+      - name: Generate Convex bindings
+        run: bunx convex codegen --typecheck=disable
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:

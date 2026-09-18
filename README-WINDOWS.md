@@ -90,6 +90,7 @@ RBuilder — это веб-приложение: фронт (Vite) + бэкен�
 | «Administrator permission is required» | Visual Studio Build Tools и VCRedist требуют прав админа. Подтвердите UAC-запрос — скрипт продолжится сам |
 | «no compatible toolchain / linker.exe not found» | Не доустановились C++ Build Tools. Повторный запуск `install-rbuilder-windows.bat` доустановит workload |
 | Сборка падает на `bun install` | Проверьте доступ к npm-реестру (корпоративный прокси?). `bun install` вручную, затем `build-windows.bat` |
+| Ошибки `Cannot find module '@/convex/_generated/api'` и сотни ошибок типа `TS7006` | В скачанном архиве нет папки `src/convex/_generated` (генерируется автоматически). Запустите `install-rbuilder-windows.bat` — он её создаст; либо вручную: `bunx convex codegen --typecheck=disable` |
 | Окно открывается пустым | Нет `VITE_CONVEX_URL` в `.env` — впишите адрес Convex deployment и пересоберите |
 
 Каждый шаг скрипта пишет, что делает; при ошибке — человекочитаемое сообщение

@@ -209,6 +209,18 @@ function Ensure-ProjectDependencies {
   & bun install
   if ($LASTEXITCODE -ne 0) { throw "bun install failed (network/proxy?). Run 'bun install' manually for details." }
   Write-Ok "Project dependencies"
+
+  # Convex type bindings are committed to the repo, so a fresh clone or ZIP
+  # typechecks out of the box. Regenerate only when they are missing (e.g. an
+  # old archive or a manual cleanup); this may ask for a Convex login.
+  if (-not (Test-Path "src\convex\_generated\api.d.ts")) {
+    Write-Info "Convex bindings missing - generating (a browser login may be asked)..."
+    & bunx convex codegen --typecheck=disable
+    if ($LASTEXITCODE -ne 0) {
+      throw "Convex bindings could not be generated. Run 'bunx convex dev --once' first, then this script again."
+    }
+    Write-Ok "Convex bindings generated"
+  }
 }
 
 function Build-Project {

@@ -130,6 +130,15 @@ ensure_project_dependencies() {
   info "bun install..."
   bun install
   ok "Project dependencies"
+
+  # Convex type bindings are committed to the repo, so a fresh clone or ZIP
+  # typechecks out of the box. Regenerate only when they are missing (e.g. an
+  # old archive or a manual cleanup); this may ask for a Convex login.
+  if [[ ! -f src/convex/_generated/api.d.ts ]]; then
+    info "Convex bindings missing - generating (a browser login may be asked)..."
+    bunx convex codegen --typecheck=disable || fail "Convex bindings could not be generated. Run 'bunx convex dev --once' first, then this script again."
+    ok "Convex bindings generated"
+  fi
 }
 
 run_checks_and_build() {
