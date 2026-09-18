@@ -135,6 +135,7 @@ rustup target add aarch64-apple-darwin x86_64-apple-darwin
 | Терминал пишет `Permission denied` | Файл не получил право на запуск после распаковки ZIP: в Терминале `chmod +x *.command setup-mac.sh` |
 | Установка CLT не начинается | Откройте Терминал и выполните `xcode-select --install`, подтвердите диалог, затем перезапустите скрипт |
 | `error: unable to find utility "git"` | Xcode CLT доустановились не полностью. Перезапустите `install-rbuilder-mac.command` — он продолжит с места ошибки |
+| Ошибки `E0255: the name __cmd__… is defined multiple times` при компиляции Rust | Команда объявлена как `pub fn` в корне `src-tauri/src/lib.rs`. Лечится разово: `perl -0pi -e 's/#\[tauri::command\]\s*pub fn/#[tauri::command] fn/g' src-tauri/src/lib.rs` |
 | Ошибки `Cannot find module '@/convex/_generated/api'` и сотни ошибок типа `TS7006` | В скачанном архиве нет папки `src/convex/_generated` (генерируется автоматически). Скрипт сам её создаст при первом запуске; либо вручную: `bunx convex codegen --typecheck=disable` |
 | Сборка падает на `bun install` | Проверьте доступ к npm-реестру (корпоративный прокси?). Выполните `bun install` вручную, затем `build-rbuilder-mac.command` |
 | `linker "cc" not found` | Не установлены Xcode CLT. Перезапустите `install-rbuilder-mac.command` |

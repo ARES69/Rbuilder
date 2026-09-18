@@ -91,6 +91,7 @@ RBuilder — это веб-приложение: фронт (Vite) + бэкен�
 | «no compatible toolchain / linker.exe not found» | Не доустановились C++ Build Tools. Повторный запуск `install-rbuilder-windows.bat` доустановит workload |
 | Сборка падает на `bun install` | Проверьте доступ к npm-реестру (корпоративный прокси?). `bun install` вручную, затем `build-windows.bat` |
 | Ошибки `Cannot find module '@/convex/_generated/api'` и сотни ошибок типа `TS7006` | В скачанном архиве нет папки `src/convex/_generated` (генерируется автоматически). Запустите `install-rbuilder-windows.bat` — он её создаст; либо вручную: `bunx convex codegen --typecheck=disable` |
+| Ошибки `E0255: the name __cmd__… is defined multiple times` при компиляции Rust | Команда объявлена как `pub fn` в корне `src-tauri/src/lib.rs`. Лечится разово: `perl -0pi -e 's/#\[tauri::command\]\s*pub fn/#[tauri::command] fn/g' src-tauri/src/lib.rs` |
 | Окно открывается пустым | Нет `VITE_CONVEX_URL` в `.env` — впишите адрес Convex deployment и пересоберите |
 
 Каждый шаг скрипта пишет, что делает; при ошибке — человекочитаемое сообщение
