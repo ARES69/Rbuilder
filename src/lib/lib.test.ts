@@ -31,6 +31,13 @@ import {
   validateSnapshotMeta,
 } from "./recipes";
 import {
+  computeTrends,
+  formatGrowth,
+  formatTopTrend,
+  risingSkills,
+  suggestSkills,
+} from "./skill-trends";
+import {
   DEFAULT_PROVIDER,
   PROVIDERS,
   estimateCostRub,
@@ -1471,5 +1478,92 @@ describe("Snapshot recipe helpers", () => {
     expect(validateSnapshotMeta("x".repeat(90), "")).toContain("длиннее");
     expect(validateSnapshotMeta("ok", "y".repeat(500))).toContain("длиннее");
     expect(validateSnapshotMeta("Норм", " fine ")).toBeNull();
+  });
+});
+
+describe("Skill trends helpers", () => {
+  const nameOf = (id: string) => BUILT_IN_SKILLS.find((s) => s.id === id)?.name ?? id;
+
+  test("computeTrends counts adoption and growth", () => {
+    const trends = computeTrends({
+      currentWeek: [
+        { skillId: "a11y", enabled: 4 },
+        { skillId: "forms-ux", enabled: 1 },
+      ],
+      previousWeek: [{ skillId: "a11y", enabled: 1 }],
+      totalUsers: 10,
+    });
+    const a11y = trends.find((t) => t.skillId === "a11y");
+    expect(a11y?.adoption).toBe(0.4);
+    expect(a11y?.previousAdoption).toBe(0.1);
+    expect(a11y?.growth).toBe(30);
+    // below the noise floor, but still counted
+    expect(trends.find((t) => t.skillId === "forms-ux")?.users).toBe(1);
+  });
+
+  test("formatTopTrend respects the noise floor", () => {
+    const trends = computeTrends({
+      currentWeek: [{ skillId: "a11y", enabled: 2 }],
+      previousWeek: [],
+      totalUsers: 10,
+    });
+    expect(formatTopTrend(trends, nameOf)).toBeNull();
+    const bigger = computeTrends({
+      currentWeek: [{ skillId: "a11y", enabled: 5 }],
+      previousWeek: [],
+      totalUsers: 10,
+    });
+    expect(formatTopTrend(bigger, nameOf)).toBe(
+      "Неделя: 50% юзеров включили скилл «Доступность»",
+    );
+  });
+
+  test("risingSkills sorts by growth and filters non-growers", () => {
+    const trends = computeTrends({
+      currentWeek: [
+        { skillId: "a11y", enabled: 5 },
+        { skillId: "clean-code", enabled: 4 },
+        { skillId: "chart-pack", enabled: 4 },
+      ],
+      previousWeek: [
+        { skillId: "a11y", enabled: 1 },
+        { skillId: "clean-code", enabled: 4 },
+        { skillId: "chart-pack", enabled: 1 },
+      ],
+      totalUsers: 10,
+    });
+    const rising = risingSkills(trends);
+    expect(rising[0].skillId).toBe("a11y");
+    expect(rising.map((t) => t.skillId)).not.toContain("clean-code");
+    expect(formatGrowth(300)).toBe("+300%");
+  });
+
+  test("suggestSkills signals from project files, skips enabled ones", () => {
+    const files = [
+      {
+        path: "index.html",
+        content: "<form><input><button>Купить</button></form><img src=x>",
+      },
+    ];
+    const all = new Set(BUILT_IN_SKILLS.map((s) => s.id));
+    const suggestions = suggestSkills(files, new Set(), BUILT_IN_SKILLS);
+    const ids = suggestions.map((s) => s.skillId);
+    expect(ids).toContain("forms-ux");
+    expect(ids).toContain("a11y");
+    // enabled skills are never suggested
+    expect(suggestSkills(files, all, BUILT_IN_SKILLS)).toEqual([]);
+    // empty project → nothing
+    expect(suggestSkills([], new Set(), BUILT_IN_SKILLS)).toEqual([]);
+  });
+
+  test("suggestSkills detects a shop without RU commerce patterns", () => {
+    const files = [
+      {
+        path: "index.html",
+        content: "<div>Товары, корзина, доставка. Цена: 1000 руб.",
+      },
+    ];
+    const ids = suggestSkills(files, new Set(), BUILT_IN_SKILLS).map((s) => s.skillId);
+    expect(ids).toContain("ru-commerce");
   });
 });

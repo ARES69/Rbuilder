@@ -67,7 +67,7 @@ export const toggle = mutation({
       .unique();
 
     if (existing) {
-      await ctx.db.patch(existing._id, { enabled });
+      await ctx.db.patch(existing._id, { enabled, updatedAt: Date.now() });
     } else {
       await ctx.db.insert("userSkills", {
         userId: user._id,
@@ -75,6 +75,7 @@ export const toggle = mutation({
         enabled,
         kind: "skill",
         custom: undefined,
+        updatedAt: Date.now(),
       });
     }
   },
@@ -156,5 +157,48 @@ export const enabledPrompts = query({
       if (row.custom && row.enabled) prompts.push(row.custom.prompt);
     }
     return prompts;
+  },
+});
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Platform-wide skill trends for the Trends block. Anonymous by design:
+ * per-skill enable counts and a distinct-user denominator — no user rows,
+ * no ids, nothing to profile an individual with.
+ */
+export const trends = query({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const all = await ctx.db.query("userSkills").collect();
+    const skillRows = all.filter(
+      (row) => row.kind !== "tool" && row.enabled,
+    );
+
+    const usersThisWeek = new Set<string>();
+    const usersPrevWeek = new Set<string>();
+    const currentWeek = new Map<string, number>();
+    const previousWeek = new Map<string, number>();
+
+    for (const row of skillRows) {
+      const at = row.updatedAt ?? 0;
+      if (now - at <= WEEK_MS) {
+        usersThisWeek.add(row.userId);
+        currentWeek.set(row.skillId, (currentWeek.get(row.skillId) ?? 0) + 1);
+      } else if (at > 0 && now - at <= 2 * WEEK_MS) {
+        usersPrevWeek.add(row.userId);
+        previousWeek.set(row.skillId, (previousWeek.get(row.skillId) ?? 0) + 1);
+      }
+    }
+
+    const toRows = (map: Map<string, number>) =>
+      [...map.entries()].map(([skillId, enabled]) => ({ skillId, enabled }));
+
+    return {
+      currentWeek: toRows(currentWeek),
+      previousWeek: toRows(previousWeek),
+      totalUsers: usersThisWeek.size,
+    };
   },
 });

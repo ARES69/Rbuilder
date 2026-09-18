@@ -30,10 +30,17 @@ import {
   type SkillCategory,
 } from "@/lib/skills";
 import { MODELS } from "@/lib/models";
+import {
+  computeTrends,
+  formatGrowth,
+  formatTopTrend,
+  risingSkills,
+  suggestSkills,
+} from "@/lib/skill-trends";
 import { toast } from "sonner";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { Loader2, Plus, Puzzle, Search, Trash2, Zap } from "lucide-react";
+import { Flame, Lightbulb, Loader2, Plus, Puzzle, Search, Trash2, TrendingUp, Zap } from "lucide-react";
 
 type EffectiveSkill = Skill;
 
@@ -80,12 +87,41 @@ function useEffectiveSkills(): {
   }, [data, toggleMutation, addMutation, removeMutation]);
 }
 
-export function SkillsPanel({ activeModelId }: { activeModelId?: string }) {
+export function SkillsPanel({
+  activeModelId,
+  projectFiles,
+}: {
+  activeModelId?: string;
+  projectFiles?: { path: string; content: string }[];
+}) {
   const { skills, enabled, toggle, addCustom, removeCustom, isLoading } =
     useEffectiveSkills();
   const [category, setCategory] = useState<SkillCategory | null>(null);
   const [query, setQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  // Platform trends (anonymous counts) — headline + rising skills.
+  const trendsData = useQuery(api.skills.trends, {});
+  const trends = useMemo(
+    () =>
+      trendsData
+        ? computeTrends({
+            currentWeek: trendsData.currentWeek,
+            previousWeek: trendsData.previousWeek,
+            totalUsers: trendsData.totalUsers,
+          })
+        : [],
+    [trendsData],
+  );
+  const skillName = (id: string) => skills.find((s) => s.id === id)?.name ?? id;
+  const headline = formatTopTrend(trends, skillName);
+  const rising = risingSkills(trends);
+
+  // Project-level suggestions: relevant skills that are currently off.
+  const suggestions = useMemo(
+    () => suggestSkills(projectFiles ?? [], enabled, skills),
+    [projectFiles, enabled, skills],
+  );
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -140,6 +176,60 @@ export function SkillsPanel({ activeModelId }: { activeModelId?: string }) {
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-2 p-4 pt-3">
+          {headline || rising.length > 0 ? (
+            <div className="mb-1 rounded-md border border-border/70 bg-accent/30 px-3 py-2">
+              <p className="flex items-center gap-1.5 text-[11px] font-medium">
+                <TrendingUp className="size-3.5 text-muted-foreground" />
+                {headline ?? "Тренды скиллов платформы"}
+              </p>
+              {rising.length > 0 ? (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {rising.map((trend) => (
+                    <Badge
+                      key={trend.skillId}
+                      variant="outline"
+                      className="h-5 rounded-full px-2 text-[10px] font-normal text-muted-foreground"
+                    >
+                      <Flame className="mr-1 size-3" />
+                      {skillName(trend.skillId)} {formatGrowth(trend.growth)}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {suggestions.length > 0 ? (
+            <div className="mb-1 rounded-md border border-dashed border-border/70 px-3 py-2">
+              <p className="flex items-center gap-1.5 text-[11px] font-medium">
+                <Lightbulb className="size-3.5 text-muted-foreground" />
+                Подходит для вашего проекта
+              </p>
+              <div className="mt-1.5 flex flex-col gap-1.5">
+                {suggestions.map((suggestion) => {
+                  const skill = skills.find((s) => s.id === suggestion.skillId);
+                  if (!skill) return null;
+                  return (
+                    <div key={suggestion.skillId} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                        {skill.name} — {suggestion.reason}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 shrink-0 px-2 text-[10px]"
+                        onClick={() => toggle(skill.id, true)}
+                      >
+                        Включить
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           {isLoading ? (
             <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />

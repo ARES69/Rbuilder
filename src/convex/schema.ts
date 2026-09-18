@@ -349,6 +349,8 @@ const schema = defineSchema(
           compatibleModels: v.optional(v.array(v.string())),
         }),
       ),
+      /** Last toggle time — feeds anonymous weekly skill-trend stats. */
+      updatedAt: v.optional(v.number()),
     })
       .index("by_user", ["userId"])
       .index("by_user_skill", ["userId", "skillId"]),

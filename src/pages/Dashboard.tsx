@@ -376,6 +376,16 @@ export default function Dashboard() {
 
   const activeModel = getModel(selectedProject?.model ?? pendingModel);
 
+  /** Skill-trend signals read the project sources (bounded, non-secret). */
+  const projectFilesForSignals = useMemo(
+    () =>
+      (projectFiles ?? [])
+        .filter((file) => !file.path.startsWith("docs/"))
+        .slice(0, 30)
+        .map((file) => ({ path: file.path, content: file.content.slice(0, 8_000) })),
+    [projectFiles],
+  );
+
   const stagedSize = stagedFiles.reduce((sum, f) => sum + f.file.size, 0);
 
   const addFiles = (files: FileList | null) => {
@@ -1558,7 +1568,10 @@ export default function Dashboard() {
         ) : workspaceTab === "snapshots" ? (
           <SnapshotsPanel />
         ) : workspaceTab === "skills" ? (
-          <SkillsPanel activeModelId={activeModel.id} />
+          <SkillsPanel
+            activeModelId={activeModel.id}
+            projectFiles={projectFilesForSignals}
+          />
         ) : workspaceTab === "tools" ? (
           <ToolsPanel />
         ) : workspaceTab === "keys" ? (
