@@ -9,6 +9,7 @@ export type WorkspaceTab =
   | "preview"
   | "code"
   | "data"
+  | "snapshots"
   | "keys"
   | "integrations"
   | "skills"
@@ -19,6 +20,7 @@ const TABS: { value: WorkspaceTab; label: string }[] = [
   { value: "preview", label: "Превью" },
   { value: "code", label: "Код" },
   { value: "data", label: "Данные" },
+  { value: "snapshots", label: "Снапшоты" },
   { value: "skills", label: "Навыки" },
   { value: "tools", label: "Инструменты" },
   { value: "keys", label: "API-ключи" },

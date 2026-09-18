@@ -36,6 +36,7 @@ import {
 } from "@/components/workspace-panels";
 import { SkillsPanel } from "@/components/skills-panel";
 import { ToolsPanel } from "@/components/tools-panel";
+import { SnapshotsPanel } from "@/components/snapshots-panel";
 import { resolveEnabledTools } from "@/lib/tools";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocalModelBridge } from "@/components/local-model-bridge";
@@ -1554,6 +1555,8 @@ export default function Dashboard() {
           ) : (
             <PanelEmpty text="Create a project to browse its data." />
           )
+        ) : workspaceTab === "snapshots" ? (
+          <SnapshotsPanel />
         ) : workspaceTab === "skills" ? (
           <SkillsPanel activeModelId={activeModel.id} />
         ) : workspaceTab === "tools" ? (

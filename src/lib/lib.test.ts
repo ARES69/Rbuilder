@@ -23,6 +23,14 @@ import {
   sourceBaseFromDoc,
 } from "./file-docs";
 import {
+  SNAPSHOT_FORMAT_VERSION,
+  buildRecipe,
+  parseRecipe,
+  recipeSummary,
+  serializeRecipe,
+  validateSnapshotMeta,
+} from "./recipes";
+import {
   DEFAULT_PROVIDER,
   PROVIDERS,
   estimateCostRub,
@@ -1373,5 +1381,95 @@ describe("File docs helpers", () => {
     expect(docsLanguage("docs/A.md")).toBe("markdown");
     expect(docsLanguage("index.html")).toBe("html");
     expect(docsLanguage("src/App.tsx")).toBeUndefined();
+  });
+});
+
+describe("Snapshot recipe helpers", () => {
+  const baseSkill = {
+    skillId: "dark-mode",
+    enabled: true,
+  };
+  const baseTool = { toolId: "reviewer", enabled: false };
+
+  test("buildRecipe normalizes and clamps untrusted input", () => {
+    const recipe = buildRecipe(
+      {
+        createdAt: 123,
+        workspace: { architectureId: " nextjs-ssr ", rules: "x".repeat(20_000) },
+        skills: [baseSkill, null as never, { skillId: "", enabled: true }, {
+          skillId: "custom-1",
+          enabled: true,
+          custom: { name: "My skill", desc: "d", prompt: "p", category: "weird" as never },
+        }],
+        tools: [baseTool, { toolId: 42 } as never],
+      },
+      "Fallback",
+    );
+    expect(recipe.formatVersion).toBe(SNAPSHOT_FORMAT_VERSION);
+    expect(recipe.workspace.architectureId).toBe("nextjs-ssr");
+    // rules clamped to 10_000
+    expect(recipe.workspace.rules?.length).toBe(10_000);
+    // invalid entries dropped, bad category coerced to "code"
+    expect(recipe.skills.length).toBe(2);
+    expect(recipe.skills[1].custom?.category).toBe("code");
+    expect(recipe.tools.length).toBe(1);
+  });
+
+  test("parseRecipe rejects garbage and newer formats", () => {
+    expect(parseRecipe("").ok).toBe(false);
+    expect(parseRecipe("not json").ok).toBe(false);
+    expect(parseRecipe("[1,2]").ok).toBe(false);
+    const newer = JSON.stringify({ formatVersion: SNAPSHOT_FORMAT_VERSION + 1, name: "x" });
+    expect(parseRecipe(newer)).toEqual({
+      ok: false,
+      error: expect.stringContaining("новой версии"),
+    });
+    expect(parseRecipe(JSON.stringify({})).ok).toBe(false);
+  });
+
+  test("parseRecipe round-trips through serializeRecipe", () => {
+    const recipe = buildRecipe(
+      {
+        createdAt: 42,
+        workspace: { rules: "Всегда отвечай по-русски" },
+        skills: [{ skillId: "dark-mode", enabled: true }],
+        tools: [{ toolId: "web_search", enabled: true }],
+      },
+      "Мой рецепт",
+    );
+    const parsed = parseRecipe(serializeRecipe(recipe));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.recipe.name).toBe("Мой рецепт");
+      expect(parsed.recipe.workspace.rules).toBe("Всегда отвечай по-русски");
+      expect(parsed.recipe.skills[0].skillId).toBe("dark-mode");
+      expect(parsed.recipe.tools[0].toolId).toBe("web_search");
+    }
+  });
+
+  test("recipeSummary describes contents", () => {
+    const recipe = buildRecipe(
+      {
+        workspace: { architectureId: "nextjs-ssr" },
+        skills: [baseSkill, { skillId: "custom-1", enabled: false, custom: { name: "c", desc: "d", prompt: "p", category: "code" } }],
+        tools: [baseTool, { toolId: "web_search", enabled: true }],
+      },
+      "X",
+    );
+    const summary = recipeSummary(recipe);
+    expect(summary).toContain("2 навыков");
+    expect(summary).toContain("1 своих");
+    expect(summary).toContain("2 инструментов");
+    expect(summary).toContain("архитектура");
+    expect(recipeSummary(buildRecipe({ workspace: {}, skills: [], tools: [] }, "E"))).toBe(
+      "пустой снапшот",
+    );
+  });
+
+  test("validateSnapshotMeta checks name/description", () => {
+    expect(validateSnapshotMeta("", "")).toContain("Введите название");
+    expect(validateSnapshotMeta("x".repeat(90), "")).toContain("длиннее");
+    expect(validateSnapshotMeta("ok", "y".repeat(500))).toContain("длиннее");
+    expect(validateSnapshotMeta("Норм", " fine ")).toBeNull();
   });
 });

@@ -280,6 +280,50 @@ const schema = defineSchema(
       payload: v.any(),
     }).index("by_connection", ["connectionId"]),
 
+    // Global snapshots ("запомни этот момент"): the full user configuration —
+    // workspace rules/architecture plus skills and tools. Published snapshots
+    // become recipes other users can deploy into their account.
+    snapshots: defineTable({
+      userId: v.id("users"),
+      name: v.string(),
+      description: v.optional(v.string()),
+      workspace: v.object({
+        architectureId: v.optional(v.string()),
+        rules: v.optional(v.string()),
+      }),
+      skills: v.array(
+        v.object({
+          skillId: v.string(),
+          enabled: v.boolean(),
+          custom: v.optional(
+            v.object({
+              name: v.string(),
+              desc: v.string(),
+              prompt: v.string(),
+              category: v.union(
+                v.literal("design"),
+                v.literal("code"),
+                v.literal("data"),
+                v.literal("integration"),
+                v.literal("quality"),
+              ),
+              source: v.optional(v.string()),
+              compatibleModels: v.optional(v.array(v.string())),
+            }),
+          ),
+        }),
+      ),
+      tools: v.array(
+        v.object({
+          toolId: v.string(),
+          enabled: v.boolean(),
+        }),
+      ),
+      published: v.optional(v.boolean()),
+      /** Monotonic likes counter for the recipe gallery. */
+      likes: v.optional(v.number()),
+    }).index("by_user", ["userId"]),
+
     // Agent skills: per-user toggles for built-in skills and stored custom
     // skills (vendor-neutral prompt modules injected into the pipeline)
     userSkills: defineTable({
