@@ -158,7 +158,7 @@ describe("Theme contrast (all 4 themes)", () => {
 
   for (const theme of THEMES) {
     describe(theme.name, () => {
-      const pairs: [string, string, number][] = [
+      const pairs: [string, string, string, number][] = [
         ["text on background", theme.foreground, theme.background, 7],
         ["text on card", theme.cardForeground, theme.card, 7],
         ["secondary text on background", theme.mutedForeground, theme.background, 4.5],
@@ -168,7 +168,7 @@ describe("Theme contrast (all 4 themes)", () => {
         ["sidebar text", theme.sidebarForeground, theme.sidebar, 7],
         ["border visible on background", theme.border, theme.background, 1.2],
       ];
-      for (const [label, fg, bg, min] of pairs) {
+      for (const [label, fg, bg, min] of pairs as [string, string, string, number][]) {
         test(`${label}: ${fg} on ${bg} ≥ ${min}:1`, () => {
           const ratio = contrastRatio(fg, bg);
           expect(ratio).toBeGreaterThanOrEqual(min);
