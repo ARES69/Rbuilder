@@ -37,6 +37,7 @@ import {
 import { SkillsPanel } from "@/components/skills-panel";
 import { ToolsPanel } from "@/components/tools-panel";
 import { SnapshotsPanel } from "@/components/snapshots-panel";
+import { ImportDialog } from "@/components/import-dialog";
 import { resolveEnabledTools } from "@/lib/tools";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocalModelBridge } from "@/components/local-model-bridge";
@@ -85,6 +86,7 @@ import {
   Brain,
   FileText,
   Link2,
+  FileInput,
   Loader2,
   LogOut,
   Monitor,
@@ -152,6 +154,7 @@ export default function Dashboard() {
   const [architectureOpen, setArchitectureOpen] = useState(false);
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -1004,6 +1007,18 @@ export default function Dashboard() {
               variant="ghost"
               size="sm"
               className="h-8 gap-1.5 text-muted-foreground"
+              onClick={() => setImportOpen(true)}
+              disabled={generating}
+              title="Импорт из Figma / v0 / скриншота / PDF"
+            >
+              <FileInput className="size-3.5" />
+              Импорт
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-muted-foreground"
               onClick={() => setSnippetsOpen(true)}
               disabled={generating}
             >
@@ -1122,6 +1137,16 @@ export default function Dashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        projectId={effectiveProjectId ?? undefined}
+        onImported={(prompt, source) => {
+          setInput((prev) => (prev.trim() ? `${prev}\n\n${prompt}` : prompt));
+          toast.success(`Импортировано: ${source}. Просмотрите запрос перед сборкой.`);
+        }}
+      />
 
       <Dialog open={snippetsOpen} onOpenChange={setSnippetsOpen}>
         <DialogContent className="max-h-[80vh] sm:max-w-2xl">

@@ -38,6 +38,14 @@ import {
   suggestSkills,
 } from "./skill-trends";
 import {
+  classifyFile,
+  classifyUrl,
+  describeSource,
+  extractPdfText,
+  formatImportContext,
+  isUsableSpec,
+} from "./import-sources";
+import {
   DEFAULT_PROVIDER,
   PROVIDERS,
   estimateCostRub,
@@ -1565,5 +1573,65 @@ describe("Skill trends helpers", () => {
     ];
     const ids = suggestSkills(files, new Set(), BUILT_IN_SKILLS).map((s) => s.skillId);
     expect(ids).toContain("ru-commerce");
+  });
+});
+
+describe("Import sources helpers", () => {
+  test("classifyUrl recognizes figma with node-id", () => {
+    const figma = classifyUrl("https://www.figma.com/file/AbC123/My-Design?node-id=12-34");
+    expect(figma.kind).toBe("figma");
+    expect(figma.figmaFileKey).toBe("AbC123");
+    expect(figma.figmaNodeId).toBe("12:34");
+    expect(classifyUrl("https://figma.com/design/xyz99/Draft").kind).toBe("figma");
+  });
+
+  test("classifyUrl recognizes v0, lovable and plain pages", () => {
+    expect(classifyUrl("https://v0.dev/r/abc-123").kind).toBe("v0");
+    expect(classifyUrl("https://lovable.dev/projects/my-app").kind).toBe("lovable");
+    expect(classifyUrl("https://example.com/page").kind).toBe("url");
+    expect(classifyUrl("").kind).toBe("unknown");
+    expect(classifyUrl("не ссылка").kind).toBe("unknown");
+  });
+
+  test("classifyFile sorts pdf / screenshot / code export", () => {
+    expect(classifyFile("spec.pdf", "application/pdf").kind).toBe("pdf");
+    expect(classifyFile("shot.png", "image/png").kind).toBe("screenshot");
+    expect(classifyFile("page.jsx", "text/plain").kind).toBe("v0");
+    expect(classifyFile("archive.zip", "application/zip").kind).toBe("v0");
+    expect(classifyFile("notes.txt", "text/plain").kind).toBe("unknown");
+  });
+
+  test("extractPdfText pulls strings from show-text operators", () => {
+    const pdf = new TextEncoder().encode(
+      "%PDF-1.4\nBT (Hello ) Tj [(world) -250 (spec)] TJ ET\n",
+    );
+    const text = extractPdfText(pdf);
+    expect(text).toContain("Hello");
+    expect(text.toLowerCase()).toContain("world");
+  });
+
+  test("extractPdfText rejects non-pdf bytes", () => {
+    const png = new TextEncoder().encode("\u0089PNG not a pdf");
+    expect(extractPdfText(png)).toBe("");
+  });
+
+  test("isUsableSpec gates tiny texts", () => {
+    expect(isUsableSpec("коротко")).toBe(false);
+    expect(isUsableSpec("с".repeat(200))).toBe(true);
+  });
+
+  test("formatImportContext wraps and instructs", () => {
+    const block = formatImportContext({ kind: "pdf", label: "tz.pdf" }, "СПЕЦИФИКАЦИЯ");
+    expect(block).toContain("=== Импорт из PDF с ТЗ ===");
+    expect(block).toContain("СПЕЦИФИКАЦИЯ");
+    expect(block.toLowerCase()).toContain("не выдумывай");
+    const clamped = formatImportContext({ kind: "url", label: "x" }, "x".repeat(20_000));
+    expect(clamped.length).toBeLessThan(12_000);
+  });
+
+  test("describeSource is human-readable", () => {
+    expect(describeSource({ kind: "figma", figmaNodeId: "1:2" })).toContain("фрейм");
+    expect(describeSource({ kind: "screenshot" })).toContain("Скриншот");
+    expect(describeSource({ kind: "unknown" })).toContain("не распознан");
   });
 });
