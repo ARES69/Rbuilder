@@ -15,6 +15,14 @@ import {
   relayResponsePayload,
 } from "./local-model";
 import {
+  docPathFor,
+  docsLanguage,
+  isDocPath,
+  looksLikeMarkdown,
+  sortDocPaths,
+  sourceBaseFromDoc,
+} from "./file-docs";
+import {
   DEFAULT_PROVIDER,
   PROVIDERS,
   estimateCostRub,
@@ -1324,5 +1332,46 @@ describe("Expo target helpers", () => {
         { path: "package.json" },
       ]),
     ).toBe(true);
+  });
+});
+
+describe("File docs helpers", () => {
+  test("docPathFor maps source paths to docs/", () => {
+    expect(docPathFor("src/App.tsx")).toBe("docs/App.md");
+    expect(docPathFor("convex/generation.ts")).toBe("docs/generation.md");
+    expect(docPathFor("index.html")).toBe("docs/index.md");
+    // no extension → kept as-is
+    expect(docPathFor("Dockerfile")).toBe("docs/Dockerfile.md");
+    expect(docPathFor("src/utils/use-debounce.ts")).toBe("docs/use-debounce.md");
+  });
+
+  test("isDocPath and sourceBaseFromDoc round-trip", () => {
+    expect(isDocPath("docs/App.md")).toBe(true);
+    expect(isDocPath("docs/sub/App.md")).toBe(true);
+    expect(isDocPath("src/App.tsx")).toBe(false);
+    expect(isDocPath("docs/readme.txt")).toBe(false);
+    expect(sourceBaseFromDoc("docs/App.md")).toBe("App");
+  });
+
+  test("looksLikeMarkdown accepts real docs and rejects fences/prose", () => {
+    expect(looksLikeMarkdown("# Title\n\n## Что это\n- пункт")).toBe(true);
+    expect(looksLikeMarkdown("- a\n- b")).toBe(true);
+    expect(looksLikeMarkdown("use `useState` here")).toBe(true);
+    expect(looksLikeMarkdown("")).toBe(false);
+    expect(looksLikeMarkdown("```markdown\n# wrapped\n```")).toBe(false);
+  });
+
+  test("sortDocPaths puts readme-style first, then alphabetical", () => {
+    expect(sortDocPaths(["docs/Z.md", "docs/README.md", "docs/A.md"])).toEqual([
+      "docs/README.md",
+      "docs/A.md",
+      "docs/Z.md",
+    ]);
+  });
+
+  test("docsLanguage detects markdown and html only", () => {
+    expect(docsLanguage("docs/A.md")).toBe("markdown");
+    expect(docsLanguage("index.html")).toBe("html");
+    expect(docsLanguage("src/App.tsx")).toBeUndefined();
   });
 });

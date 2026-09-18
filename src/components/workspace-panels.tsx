@@ -15,11 +15,13 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { KEYLESS_LABEL } from "@/lib/research";
+import { isDocPath } from "@/lib/file-docs";
 import { PublicApiPanel } from "./public-api-panel";
 import { toast } from "sonner";
 import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import {
+  BookOpen,
   Check,
   Code2,
   Copy,
@@ -51,11 +53,13 @@ export function CodePanel({
   const [draftPath, setDraftPath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [explaining, setExplaining] = useState(false);
   const files = useQuery(
     api.projectFiles.list,
     projectId ? { projectId } : "skip",
   );
   const saveFile = useMutation(api.projectFiles.upsert);
+  const explainFile = useAction(api.fileDocs.explain);
   const restoreVersion = useMutation(api.projectVersions.restore);
   const versions = useQuery(
     api.projectVersions.list,
@@ -82,6 +86,23 @@ export function CodePanel({
       toast.error(error instanceof Error ? error.message : "Не удалось сохранить файл");
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** Ask the agent to document the selected file; result lands in docs/. */
+  const explainCurrentFile = async () => {
+    if (!projectId) return;
+    setExplaining(true);
+    try {
+      const result = await explainFile({ projectId, path: selectedPath });
+      setSelectedPath(result.docPath);
+      setDraftPath(result.docPath);
+      setDraft("");
+      toast.success(`Документация сохранена в ${result.docPath}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось объяснить файл");
+    } finally {
+      setExplaining(false);
     }
   };
 
@@ -126,6 +147,22 @@ export function CodePanel({
           </span>
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 text-muted-foreground"
+            onClick={() => void explainCurrentFile()}
+            disabled={!projectId || explaining || isDocPath(selectedPath)}
+            title={
+              isDocPath(selectedPath)
+                ? "Это уже документация — выберите файл кода"
+                : "Попросить агента объяснить этот файл"
+            }
+          >
+            {explaining ? <Loader2 className="size-3.5 animate-spin" /> : <BookOpen className="size-3.5" />}
+            Объяснить
+          </Button>
           <Button
             type="button"
             variant="ghost"
