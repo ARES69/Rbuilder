@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "tauri:mac": "bash setup-mac.sh --build",
+    "tauri:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File setup-windows.ps1 -Build",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write .",
