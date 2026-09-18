@@ -184,52 +184,30 @@
   --sidebar-ring: #bbdaff;
 }
 
-/* RBuilder IDE shell — deep navy workbench inspired by modern coding agents. */
+/* Scrollbars follow the active theme via color-scheme; no shell-level token
+   overrides: the .rbuilder-ide class used to hardcode a navy palette and
+   beat every theme (light text on blue in light themes, blue everywhere).
+   Themes own --* tokens; the shell only fixes a few placeholder/alpha rules. */
 .rbuilder-ide {
-  --background: #06111f;
-  --foreground: #e7eef9;
-  --card: #091827;
-  --card-foreground: #e7eef9;
-  --popover: #0b1b2c;
-  --popover-foreground: #e7eef9;
-  --primary: #4d7cff;
-  --primary-foreground: #ffffff;
-  --secondary: #102339;
-  --secondary-foreground: #d9e5f5;
-  --muted: #0d2034;
-  --muted-foreground: #8aa0b9;
-  --accent: #102d4b;
-  --accent-foreground: #eff6ff;
-  --border: rgba(111, 151, 197, 0.2);
-  --input: rgba(111, 151, 197, 0.28);
-  --ring: #4d7cff;
-  --sidebar: #04101d;
-  --sidebar-foreground: #c9d8ea;
-  --sidebar-primary: #4d7cff;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #112b48;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: rgba(111, 151, 197, 0.16);
-  --sidebar-ring: #4d7cff;
-  color-scheme: dark;
+  min-height: 0;
 }
 
 .rbuilder-ide .border-border\/70,
 .rbuilder-ide .border-border\/60 {
-  border-color: rgba(111, 151, 197, 0.2);
+  border-color: color-mix(in oklab, var(--border) 70%, transparent);
 }
 
 .rbuilder-ide textarea::placeholder,
 .rbuilder-ide input::placeholder {
-  color: #6f87a3;
+  color: var(--muted-foreground);
 }
 
 .rbuilder-ide .bg-muted\/30 {
-  background-color: rgba(8, 26, 44, 0.72);
+  background-color: color-mix(in oklab, var(--muted) 30%, transparent);
 }
 
 .rbuilder-ide .bg-muted\/20 {
-  background-color: rgba(4, 16, 29, 0.86);
+  background-color: color-mix(in oklab, var(--muted) 20%, transparent);
 }
 
 @layer base {

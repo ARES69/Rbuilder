@@ -46,7 +46,7 @@ function Auth({ redirectAfterAuth = "/dashboard" }: AuthProps) {
     <main className="flex min-h-screen items-center justify-center bg-background p-6">
       <Card className="w-full max-w-sm border-border/70 bg-card/90">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-xl border border-blue-400/20 bg-blue-500/10 text-blue-300">
+          <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
             <ShieldCheck className="size-6" />
           </div>
           <CardTitle className="text-lg">Административный вход</CardTitle>

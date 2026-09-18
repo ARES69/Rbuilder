@@ -89,14 +89,14 @@ export function AppSidebar({
   ];
 
   return (
-    <aside className="flex h-full w-full flex-col border-r border-border/70 bg-[#04101d]">
+    <aside className="flex h-full w-full flex-col border-r border-border/70 bg-sidebar text-sidebar-foreground">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-        <span className="flex size-7 items-center justify-center rounded-lg bg-blue-600 text-white shadow-[0_0_18px_rgba(37,99,235,0.28)]">
+        <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_18px_rgba(0,0,0,0.18)]">
           <Sparkles className="size-3.5" />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold tracking-tight text-slate-100">rbuilder</p>
-          <p className="text-[10px] text-slate-500">AI development workspace</p>
+        <p className="truncate text-sm font-semibold tracking-tight text-foreground">rbuilder</p>
+        <p className="text-[10px] text-muted-foreground">AI development workspace</p>
         </div>
       </div>
       <nav className="flex flex-col gap-0.5 border-b border-border/70 p-2">
@@ -111,8 +111,8 @@ export function AppSidebar({
               className={cn(
                 "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] transition-colors",
                 active
-                  ? "border border-blue-400/20 bg-blue-500/15 text-blue-100"
-                  : "text-muted-foreground hover:bg-[#0d263f] hover:text-foreground",
+                  ? "border border-foreground/20 bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
               )}
             >
               <Icon className="size-4 shrink-0" />
@@ -311,16 +311,16 @@ export function AppSidebar({
       </ScrollArea>
 
       <div className="border-t border-border/70 p-3">
-        <div className="rounded-lg border border-blue-400/15 bg-blue-500/5 p-2.5">
+        <div className="rounded-lg border border-border/70 bg-card/60 p-2.5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">AI Credits</span>
-            <span className="text-[10px] text-blue-300">142 / 500</span>
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">AI Credits</span>
+            <span className="text-[10px] text-foreground">142 / 500</span>
           </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
-            <div className="h-full w-[28%] rounded-full bg-blue-500" />
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="h-full w-[28%] rounded-full bg-foreground/60" />
           </div>
         </div>
-        <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500">
+        <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground">
           <span>RBuilder Desktop</span>
           <span>v1.0.0</span>
         </div>

@@ -715,16 +715,16 @@ export default function Dashboard() {
   };
 
   const chatPanel = (
-    <div className="flex h-full min-h-0 flex-col bg-[#071728]">
+    <div className="flex h-full min-h-0 flex-col bg-card/40">
       <div className="flex shrink-0 items-start gap-3 border-b border-border/60 px-4 py-3">
-        <span className="flex size-8 items-center justify-center rounded-xl bg-blue-600/20 text-blue-300 ring-1 ring-blue-400/20">
+        <span className="flex size-8 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/25">
           <Sparkles className="size-4" />
         </span>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">AI Agent</span>
-            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] text-emerald-300">
-              <span className="size-1.5 rounded-full bg-emerald-400" /> {activeModel.name}
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-600/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300">
+              <span className="size-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" /> {activeModel.name}
             </span>
           </div>
           <p className="mt-1 text-[11px] leading-4 text-muted-foreground">Пишет код, создаёт файлы, запускает сборку и разворачивает приложение</p>
@@ -836,7 +836,7 @@ export default function Dashboard() {
       {/* Composer */}
       <div className="border-t border-border/70 p-3">
         {selectingPreviewElement && (
-          <div className="mb-2 flex items-center justify-between rounded-md border border-blue-400/30 bg-blue-400/10 px-2.5 py-1.5 text-[11px] text-blue-200">
+          <div className="mb-2 flex items-center justify-between rounded-md border border-primary/30 bg-primary/10 px-2.5 py-1.5 text-[11px] text-primary dark:text-primary-foreground/90">
             <span className="flex items-center gap-1.5">
               <MousePointer2 className="size-3.5" /> Нажмите на элемент в превью · Escape — отмена
             </span>
@@ -844,7 +844,7 @@ export default function Dashboard() {
               type="button"
               variant="ghost"
               size="sm"
-              className="h-6 px-1.5 text-[10px] text-blue-200 hover:bg-blue-400/10"
+              className="h-6 px-1.5 text-[10px] text-foreground hover:bg-primary/15"
               onClick={() => setSelectingPreviewElement(false)}
             >
               Отмена
@@ -853,7 +853,7 @@ export default function Dashboard() {
         )}
 
         {selectedPreviewElement && !selectingPreviewElement && (
-          <div className="mb-2 flex items-center justify-between rounded-md border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1.5 text-[11px] text-emerald-200">
+          <div className="mb-2 flex items-center justify-between rounded-md border border-emerald-600/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200">
             <span className="flex min-w-0 items-center gap-1.5">
               <MousePointer2 className="size-3.5 shrink-0" />
               <span className="truncate">Выбран {selectedPreviewElement.selector}</span>
@@ -862,7 +862,7 @@ export default function Dashboard() {
               type="button"
               variant="ghost"
               size="sm"
-              className="h-6 px-1.5 text-[10px] text-emerald-200 hover:bg-emerald-400/10"
+              className="h-6 px-1.5 text-[10px] text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-400/10"
               onClick={() => setSelectedPreviewElement(null)}
             >
               Убрать
@@ -1274,7 +1274,7 @@ export default function Dashboard() {
                         issue.severity === "error"
                           ? "border-destructive/40 text-destructive"
                           : issue.severity === "warning"
-                            ? "border-amber-400/40 text-amber-300"
+                            ? "border-amber-500/40 text-amber-700 dark:border-amber-400/40 dark:text-amber-300"
                             : "text-muted-foreground",
                       )}
                     >
@@ -1493,7 +1493,7 @@ export default function Dashboard() {
                 "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors",
                 issueCounts.errors > 0
                   ? "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20"
-                  : "border-amber-400/30 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20",
+                  : "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300 dark:hover:bg-amber-400/20",
               )}
               title="Что статический анализ нашёл в этом билде"
             >
@@ -1635,7 +1635,7 @@ export default function Dashboard() {
             </Button>
           )}
           <div className="rbuilder-wordmark flex items-center gap-2 border-r border-border/60 pr-3">
-            <span className="flex size-7 items-center justify-center rounded-lg bg-blue-500 text-white shadow-[0_0_18px_rgba(37,99,235,0.35)]">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_18px_rgba(0,0,0,0.18)]">
               <Sparkles className="size-3.5" />
             </span>
             <span className="hidden text-sm font-semibold tracking-tight sm:inline">rbuilder</span>
@@ -1767,7 +1767,7 @@ export default function Dashboard() {
             type="button"
             variant="default"
             size="sm"
-            className="hidden h-8 gap-1.5 bg-blue-600 px-3 text-xs text-white shadow-[0_0_18px_rgba(37,99,235,0.25)] hover:bg-blue-500 sm:inline-flex"
+            className="hidden h-8 gap-1.5 bg-primary px-3 text-xs text-primary-foreground shadow-[0_0_18px_rgba(0,0,0,0.15)] hover:bg-primary/90 sm:inline-flex"
             onClick={() => void handleDeploy()}
             disabled={!selectedProject?.html || deploying}
           >
@@ -1783,7 +1783,7 @@ export default function Dashboard() {
               asChild
               variant="ghost"
               size="sm"
-              className="hidden h-8 gap-1.5 px-2 text-xs text-emerald-300 lg:inline-flex"
+              className="hidden h-8 gap-1.5 px-2 text-xs text-emerald-700 dark:text-emerald-300 lg:inline-flex"
             >
               <a
                 href={liveUrl}
@@ -1791,7 +1791,7 @@ export default function Dashboard() {
                 rel="noreferrer"
                 title="Опубликованная версия и число просмотров"
               >
-                <span className="size-1.5 rounded-full bg-emerald-400" />
+                <span className="size-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
                 live · {deployment?.visits ?? 0}
               </a>
             </Button>
@@ -1898,7 +1898,7 @@ export default function Dashboard() {
               <ResizableHandle withHandle />
               <ResizablePanel defaultSize={48} minSize={34}>
                 <div className="h-full min-h-0 p-2">
-                  <div className="h-full overflow-hidden rounded-xl border border-border/70 bg-[#071728] shadow-[0_14px_50px_rgba(0,0,0,0.22)]">
+                  <div className="h-full overflow-hidden rounded-xl border border-border/70 bg-background shadow-[0_14px_50px_rgba(0,0,0,0.22)]">
                     {previewPanel}
                   </div>
                 </div>

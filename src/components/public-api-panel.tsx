@@ -82,19 +82,19 @@ export function PublicApiPanel() {
       </div>
 
       {freshKey ? (
-        <div className="flex flex-col gap-2 rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3">
-          <span className="text-[11px] text-emerald-200">
+        <div className="flex flex-col gap-2 rounded-md border border-emerald-600/30 bg-emerald-500/10 p-3 dark:border-emerald-400/30 dark:bg-emerald-400/10">
+          <span className="text-[11px] text-emerald-700 dark:text-emerald-200">
             Скопируйте ключ сейчас — он больше не будет показан.
           </span>
           <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-emerald-100">
+            <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-emerald-800 dark:text-emerald-100">
               {freshKey}
             </code>
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className="h-7 shrink-0 px-2 text-[10px] text-emerald-200"
+              className="h-7 shrink-0 px-2 text-[10px] text-emerald-700 dark:text-emerald-200"
               onClick={() => {
                 void navigator.clipboard?.writeText(freshKey);
                 toast.success("Ключ скопирован");

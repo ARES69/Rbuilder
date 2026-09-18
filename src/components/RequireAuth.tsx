@@ -26,7 +26,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3 text-center">
-          <Loader2 className="size-6 animate-spin text-blue-400" />
+          <Loader2 className="size-6 animate-spin text-primary" />
           <p className="text-xs text-muted-foreground">Открываем workspace…</p>
         </div>
       </main>
