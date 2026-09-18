@@ -24,6 +24,8 @@ export const status = query({
       searchKey: SEARCH_PROVIDER_VARS.some((name) => !!process.env[name]),
       emailKey: !!process.env.RESEND_API_KEY,
       paymentsKey: !!process.env.STRIPE_SECRET_KEY,
+      // Optional: unlocks real Figma REST structure for url-imports.
+      figmaToken: !!process.env.FIGMA_TOKEN,
     };
   },
 });

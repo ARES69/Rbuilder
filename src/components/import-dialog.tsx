@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { classifyFile, classifyUrl, describeSource } from "@/lib/import-sources";
 import { toast } from "sonner";
 import { useMemo, useRef, useState } from "react";
-import { useAction, useMutation } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { FileInput, Link2, Loader2, Upload } from "lucide-react";
 
 /**
@@ -35,6 +35,7 @@ export function ImportDialog({
   projectId?: Id<"projects">;
 }) {
   const importAction = useAction(api.importSource.importSource);
+  const settings = useQuery(api.settings.status, {});
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -126,6 +127,13 @@ export function ImportDialog({
                 {urlSource.kind === "unknown"
                   ? "Не похоже на поддерживаемую ссылку — попробуем как обычную страницу."
                   : `Распознано: ${describeSource(urlSource)}`}
+              </p>
+            ) : null}
+            {urlSource.kind === "figma" && settings && !settings.figmaToken ? (
+              <p className="text-[11px] leading-4 text-amber-600">
+                Без FIGMA_TOKEN структура берётся с публичной страницы — только
+                название и текст. Задайте токен во вкладке API-ключей, чтобы
+                импорт видел секции и фреймы файла.
               </p>
             ) : null}
           </div>

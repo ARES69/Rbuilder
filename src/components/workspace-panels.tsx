@@ -467,6 +467,12 @@ export function ApiKeysPanel() {
         : `Веб-исследование (инструмент web_search). Без ключа работает бесплатный вариант: ${KEYLESS_LABEL}. Любой ключ выше включает полноценный поиск.`,
       set: status.searchKey,
     },
+    {
+      key: "FIGMA_TOKEN",
+      purpose:
+        "Импорт из Figma. Без токена ссылка разбирается по публичной странице (только название и текст). С токеном (Figma → Settings → Security → Personal access tokens, scope: File content — read-only) импорт получает реальную структуру файла: секции, фреймы и node-id выделенного кадра.",
+      set: status.figmaToken,
+    },
   ];
   return (
     <div className="flex h-full min-h-0 flex-col">
