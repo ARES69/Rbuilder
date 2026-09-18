@@ -142,6 +142,14 @@ ensure_project_dependencies() {
 }
 
 run_checks_and_build() {
+  # The desktop build bakes the backend address into the bundle at compile
+  # time. Without it the installed app has nothing to talk to, so stop early
+  # with the one command that fixes it.
+  if ! grep -q "^VITE_CONVEX_URL=" .env.local 2>/dev/null; then
+    fail "No backend address found (.env.local with VITE_CONVEX_URL). Run:\n       bunx convex dev --once    (opens a browser once to create your free Convex deployment)\n     ...then run this script again."
+  fi
+  ok "Backend address found in .env.local"
+
   info "TypeScript check..."
   bunx tsc -b --noEmit
   ok "TypeScript check"

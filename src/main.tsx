@@ -82,7 +82,45 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+const convexUrl = (import.meta.env.VITE_CONVEX_URL ?? "") as string;
+
+/**
+ * Readable full-screen diagnostic for a broken desktop build.
+ * A module-init crash renders nothing at all — a blank white window — so the
+ * client creation below is guarded and any problem is surfaced here instead.
+ */
+function BuildDiagnostic({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
+      <div className="max-w-md rounded-lg border border-border bg-card p-6 shadow-sm">
+        <h1 className="text-base font-semibold">{title}</h1>
+        <p className="mt-2 text-sm text-muted-foreground break-words">{detail}</p>
+        <p className="mt-4 text-xs text-muted-foreground">
+          Fix: run <code className="rounded bg-muted px-1">bunx convex dev --once</code> in the
+          project folder (creates .env.local with VITE_CONVEX_URL), then rebuild the app.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Surface uncaught module/runtime errors visibly instead of a white window.
+window.addEventListener("error", (event) => {
+  const root = document.getElementById("root");
+  if (!root || root.childElementCount > 0) return;
+  root.innerHTML =
+    `<div style="font:13px/1.5 -apple-system,system-ui,sans-serif;padding:24px;color:#111">` +
+    `<strong>Startup error</strong><br>${String(event.message ?? "unknown")}</div>`;
+});
+
+let convex: ConvexReactClient | null = null;
+if (convexUrl) {
+  try {
+    convex = new ConvexReactClient(convexUrl);
+  } catch (error) {
+    console.error("Convex client failed to initialize:", error);
+  }
+}
 
 
 
@@ -111,53 +149,64 @@ function RouteSyncer() {
 
 
 createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <RootErrorBoundary>
-      <ToolbarErrorBoundary>
-        <VlyToolbar />
-      </ToolbarErrorBoundary>
-      <ConvexAuthProvider client={convex}>
-        <ThemeProvider>
-          <BrowserRouter>
-            <RouteSyncer />
-            <Suspense fallback={<RouteLoading />}>
-              <Routes>
-                <Route
-                  path="/"
-                  element={
-                    <RequireAuth>
-                      <Dashboard />
-                    </RequireAuth>
-                  }
-                />
-                <Route path="/landing" element={<Landing />} />
-                <Route
-                  path="/auth"
-                  element={<AuthPage redirectAfterAuth="/dashboard" />}
-                />
-                <Route
-                  path="/dashboard"
-                  element={
-                    <RequireAuth>
-                      <Dashboard />
-                    </RequireAuth>
-                  }
-                />
-                <Route
-                  path="/admin"
-                  element={
-                    <RequireAuth>
-                      <Admin />
-                    </RequireAuth>
-                  }
-                />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </Suspense>
-          </BrowserRouter>
-          <Toaster />
-        </ThemeProvider>
-      </ConvexAuthProvider>
-    </RootErrorBoundary>
-  </StrictMode>,
+  convex ? (
+    <StrictMode>
+      <RootErrorBoundary>
+        <ToolbarErrorBoundary>
+          <VlyToolbar />
+        </ToolbarErrorBoundary>
+        <ConvexAuthProvider client={convex}>
+          <ThemeProvider>
+            <BrowserRouter>
+              <RouteSyncer />
+              <Suspense fallback={<RouteLoading />}>
+                <Routes>
+                  <Route
+                    path="/"
+                    element={
+                      <RequireAuth>
+                        <Dashboard />
+                      </RequireAuth>
+                    }
+                  />
+                  <Route path="/landing" element={<Landing />} />
+                  <Route
+                    path="/auth"
+                    element={<AuthPage redirectAfterAuth="/dashboard" />}
+                  />
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <RequireAuth>
+                        <Dashboard />
+                      </RequireAuth>
+                    }
+                  />
+                  <Route
+                    path="/admin"
+                    element={
+                      <RequireAuth>
+                        <Admin />
+                      </RequireAuth>
+                    }
+                  />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </Suspense>
+            </BrowserRouter>
+            <Toaster />
+          </ThemeProvider>
+        </ConvexAuthProvider>
+      </RootErrorBoundary>
+    </StrictMode>
+  ) : (
+    <BuildDiagnostic
+      title="RBuilder: backend address is not built in"
+      detail={
+        convexUrl
+          ? "The Convex client could not be created from the built-in address."
+          : `This build has no VITE_CONVEX_URL (got: "${convexUrl || "undefined"}").`
+      }
+    />
+  ),
 );

@@ -224,6 +224,15 @@ function Ensure-ProjectDependencies {
 }
 
 function Build-Project {
+  # The desktop build bakes the backend address into the bundle at compile
+  # time. Without it the installed app has nothing to talk to, so stop early
+  # with the one command that fixes it.
+  $envFile = ".env.local"
+  if ((-not (Test-Path $envFile)) -or (-not (Select-String -Path $envFile -Pattern "^VITE_CONVEX_URL=" -Quiet))) {
+    throw "No backend address found (.env.local with VITE_CONVEX_URL). Run: bunx convex dev --once (opens a browser once to create your free Convex deployment), then run this script again."
+  }
+  Write-Ok "Backend address found in .env.local"
+
   Write-Info "TypeScript check..."
   & bunx tsc -b --noEmit
   if ($LASTEXITCODE -ne 0) { throw "TypeScript check failed." }
