@@ -1,3 +1,9 @@
 .env.local
 node_modules
 dist
+
+# Local code-signing material and the generated Tauri signing override.
+*.pfx
+certificate/
+.tauri-signing.conf.json
+src-tauri/tauri.signing.conf.json

@@ -223,6 +223,86 @@ function Ensure-ProjectDependencies {
   }
 }
 
+# ---------------------------------------------------------------------------
+# Code signing (optional)
+#
+# Nothing below runs unless a certificate is configured, so an unsigned build
+# keeps working exactly as before. Set one of these before building:
+#   RB_SIGN_PFX            path to a .pfx file (+ RB_SIGN_PFX_PASSWORD)
+#   RB_SIGN_THUMBPRINT     thumbprint of a certificate already in the user store
+#   RB_SIGN_SIGNCOMMAND    custom sign command with a %1 placeholder
+#   RB_SIGN_TIMESTAMP_URL  timestamp server (default: DigiCert)
+# Signing here also covers the app executable *inside* the installers, which
+# post-build signing cannot reach. Background: README-WINDOWS.md.
+
+function Get-SigningTimestampUrl {
+  if ($env:RB_SIGN_TIMESTAMP_URL) { return $env:RB_SIGN_TIMESTAMP_URL }
+  return "http://timestamp.digicert.com"
+}
+
+function Get-SigningDigestAlgorithm {
+  if ($env:RB_SIGN_DIGEST_ALGORITHM) { return $env:RB_SIGN_DIGEST_ALGORITHM }
+  return "sha256"
+}
+
+function Resolve-SigningThumbprint {
+  if ($env:RB_SIGN_THUMBPRINT) { return $env:RB_SIGN_THUMBPRINT }
+  if (-not $env:RB_SIGN_PFX) { return $null }
+  if (-not (Test-Path -LiteralPath $env:RB_SIGN_PFX)) {
+    throw "RB_SIGN_PFX points at a file that does not exist: $($env:RB_SIGN_PFX)"
+  }
+  Write-Info "Importing the signing certificate into Cert:\CurrentUser\My..."
+  $password = ConvertTo-SecureString -String ([string]$env:RB_SIGN_PFX_PASSWORD) -Force -AsPlainText
+  $imported = Import-PfxCertificate -FilePath $env:RB_SIGN_PFX -CertStoreLocation "Cert:\CurrentUser\My" -Password $password
+  if (-not $imported) { throw "The .pfx could not be imported - check the password." }
+  return $imported.Thumbprint
+}
+
+# Writes the Tauri config override that switches signing on. Returns $null when
+# no certificate is configured, so the caller can keep building unsigned.
+function New-SigningConfig {
+  $signCommand = $env:RB_SIGN_SIGNCOMMAND
+  $thumbprint = $null
+  if (-not $signCommand) { $thumbprint = Resolve-SigningThumbprint }
+  if (-not $signCommand -and -not $thumbprint) { return $null }
+
+  $windows = @{}
+  if ($signCommand) {
+    $windows["signCommand"] = $signCommand
+    $description = "custom sign command"
+    $importedThumbprint = $null
+  } else {
+    $windows["certificateThumbprint"] = $thumbprint
+    $windows["digestAlgorithm"] = Get-SigningDigestAlgorithm
+    $windows["timestampUrl"] = Get-SigningTimestampUrl
+    $description = "certificate $thumbprint"
+    $importedThumbprint = ""
+    if ($env:RB_SIGN_PFX -and -not $env:RB_SIGN_THUMBPRINT) { $importedThumbprint = $thumbprint }
+  }
+
+  $json = @{ bundle = @{ windows = $windows } } | ConvertTo-Json -Depth 6
+  $path = Join-Path (Get-Location) ".tauri-signing.conf.json"
+  # Written without a BOM: PowerShell 5.1's `Set-Content -Encoding utf8` adds
+  # one, and a BOM makes the JSON unreadable for the Tauri CLI.
+  $utf8 = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($path, $json, $utf8)
+
+  return [pscustomobject]@{
+    Path = $path
+    Description = $description
+    ImportedThumbprint = $importedThumbprint
+  }
+}
+
+function Remove-SigningConfig($Signing) {
+  if (-not $Signing) { return }
+  if (Test-Path -LiteralPath $Signing.Path) { Remove-Item -LiteralPath $Signing.Path -Force }
+  # Only a certificate this script imported itself is removed again.
+  if ($Signing.ImportedThumbprint) {
+    Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($Signing.ImportedThumbprint)" -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Build-Project {
   # The desktop build bakes the backend address into the bundle at compile
   # time. Without it the installed app has nothing to talk to, so stop early
@@ -245,9 +325,25 @@ function Build-Project {
   & bun run build
   if ($LASTEXITCODE -ne 0) { throw "Web build failed." }
 
+  $signing = New-SigningConfig
+  if ($signing) {
+    Write-Ok "Code signing enabled ($($signing.Description))"
+  } else {
+    Write-Info "No certificate configured - the installers stay unsigned and Windows will warn."
+    Write-Info "See README-WINDOWS.md > Signing and SmartScreen to turn that off."
+  }
+
   Write-Info "Tauri installer build (several minutes)..."
-  & bunx tauri build
-  if ($LASTEXITCODE -ne 0) { throw "Tauri build failed." }
+  try {
+    if ($signing) {
+      & bunx tauri build --config $signing.Path
+    } else {
+      & bunx tauri build
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Tauri build failed." }
+  } finally {
+    Remove-SigningConfig $signing
+  }
 
   # Tauri may place bundles under the target triple folder
   # (src-tauri\target\x86_64-pc-windows-msvc\release\bundle), so report the
@@ -262,6 +358,19 @@ function Build-Project {
     $installers | ForEach-Object { Write-Host "  $($_.FullName)" -ForegroundColor Green }
   } else {
     Write-Info "No .msi/-setup.exe found under src-tauri\target - read the build output above."
+  }
+
+  # Report what the signatures actually say instead of assuming the signing
+  # step did its job.
+  if ($signing) {
+    foreach ($installer in $installers) {
+      $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+      if ($signature.Status -eq "Valid") {
+        Write-Ok "Signed: $($installer.Name) - $($signature.SignerCertificate.Subject)"
+      } else {
+        Write-Info "Not verifiably signed: $($installer.Name) - $($signature.Status)"
+      }
+    }
   }
 }
 

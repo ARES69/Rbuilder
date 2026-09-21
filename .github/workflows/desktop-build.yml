@@ -62,6 +62,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VITE_CONVEX_URL: ${{ secrets.VITE_CONVEX_URL || 'https://placeholder.convex.cloud' }}
+      # Windows code signing is opt-in. With no WINDOWS_CERTIFICATE secret the
+      # build stays unsigned and SmartScreen warns - see README-WINDOWS.md.
+      # Secrets cannot be used directly in `if:`, hence the job-level env.
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
 
     steps:
       - uses: actions/checkout@v4
@@ -97,9 +103,53 @@ jobs:
         if: matrix.target == 'universal-apple-darwin'
         run: bunx tauri build --target universal-apple-darwin
 
-      - name: Build installers (Windows)
-        if: matrix.target != 'universal-apple-darwin'
+      # Base64 .pfx -> user certificate store, plus the Tauri signing override.
+      - name: Import Windows signing certificate
+        if: matrix.target != 'universal-apple-darwin' && env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: |
+          New-Item -ItemType directory -Path certificate -Force | Out-Null
+          Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode certificate/tempCert.txt certificate/certificate.pfx
+          Remove-Item certificate/tempCert.txt
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $imported = Import-PfxCertificate -FilePath certificate/certificate.pfx `
+            -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Write-Host "Imported certificate $($imported.Thumbprint)"
+          $timestamp = $env:WINDOWS_TIMESTAMP_URL
+          if (-not $timestamp) { $timestamp = "http://timestamp.digicert.com" }
+          $config = @{ bundle = @{ windows = @{
+            certificateThumbprint = $imported.Thumbprint
+            digestAlgorithm = "sha256"
+            timestampUrl = $timestamp
+          } } } | ConvertTo-Json -Depth 6
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText(
+            (Join-Path (Get-Location) "src-tauri/tauri.signing.conf.json"), $config, $utf8)
+
+      - name: Build installers (Windows, signed)
+        if: matrix.target != 'universal-apple-darwin' && env.WINDOWS_CERTIFICATE != ''
+        run: bunx tauri build --config src-tauri/tauri.signing.conf.json
+
+      - name: Build installers (Windows, unsigned)
+        if: matrix.target != 'universal-apple-darwin' && env.WINDOWS_CERTIFICATE == ''
         run: bunx tauri build
+
+      - name: Verify Windows signatures
+        if: matrix.target != 'universal-apple-darwin' && env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: |
+          $installers = Get-ChildItem -Path src-tauri/target -Recurse -Include *.msi,*-setup.exe |
+            Where-Object { $_.FullName -match "bundle\\(msi|nsis)\\" }
+          if ($installers.Count -eq 0) { throw "No installers found to verify." }
+          foreach ($installer in $installers) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+            Write-Host "$($installer.Name): $($signature.Status) - $($signature.SignerCertificate.Subject)"
+            if ($signature.Status -eq "NotSigned") { throw "Not signed: $($installer.Name)" }
+            if ($signature.Status -ne "Valid") {
+              Write-Host "::warning::$($installer.Name) signed but the chain is not trusted: $($signature.Status)"
+            }
+          }
 
       - name: Upload artifacts (Windows)
         if: matrix.target != 'universal-apple-darwin'

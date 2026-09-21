@@ -7,6 +7,7 @@
     "dev": "vite",
     "tauri:mac": "bash setup-mac.sh --build",
     "tauri:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File setup-windows.ps1 -Build",
+    "sign:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File sign-windows.ps1",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write .",
