@@ -71,6 +71,18 @@ import {
 } from "./generation-core";
 import { describeElement, formatElementContext, pickedElementPrompt } from "./element-context";
 import {
+  PREVIEW_PICK,
+  PREVIEW_PICK_ARM,
+  PREVIEW_PICK_CANCEL,
+  PREVIEW_PICK_READY,
+  armMessage,
+  createPreviewNonce,
+  injectPreviewPicker,
+  parsePreviewPick,
+  parsePreviewPickMessage,
+  previewPickerScript,
+} from "./preview-picker";
+import {
   API_DOCS,
   API_KEY_PREFIX,
   MAX_PROMPT_CHARS,
@@ -908,6 +920,7 @@ describe("element context", () => {
     attributes: { "data-id": "tour-search", "aria-label": "Поиск" },
     computed: { display: "inline-flex", "background-color": "rgb(17, 17, 17)" },
     cssRules: [".primary { background: #111 }", "@media (max-width: 640px) { ... }"],
+    html: '<button class="primary">Найти туры</button>',
     parent: "section.hero",
     siblings: ['a.link «Туры»', 'button.ghost «Сброс»'],
   };
@@ -917,6 +930,7 @@ describe("element context", () => {
     expect(formatted).toContain("main > section.hero > button.primary");
     expect(formatted).toContain("background-color: rgb(17, 17, 17)");
     expect(formatted).toContain(".primary { background: #111 }");
+    expect(formatted).toContain('Разметка элемента: <button class="primary">');
     expect(formatted).toContain("section.hero");
     expect(formatted).toContain("Туры");
     expect(formatted).toContain("не трогай");
@@ -932,6 +946,193 @@ describe("element context", () => {
   test("composer text names the element", () => {
     expect(pickedElementPrompt(context)).toContain("main > section.hero > button.primary");
     expect(pickedElementPrompt(context)).toContain("Найти туры");
+  });
+});
+
+/* ------------------------- preview picker bridge -------------------------- */
+
+describe("preview picker bridge", () => {
+  const nonce = "rb-test-nonce";
+
+  test("the collector is injected before the closing body tag", () => {
+    const injected = injectPreviewPicker("<!doctype html><html><body><h1>Hi</h1></body></html>", nonce);
+    expect(injected).toContain(`data-rbuilder-picker="${nonce}"`);
+    expect(injected.indexOf("data-rbuilder-picker")).toBeLessThan(injected.indexOf("</body>"));
+    expect(injected).toContain("<h1>Hi</h1>");
+    expect(injected.endsWith("</html>")).toBe(true);
+  });
+
+  test("injection is idempotent and survives a missing body tag", () => {
+    const fragment = injectPreviewPicker("<main>Привет</main>", nonce);
+    expect(fragment.endsWith("</script>")).toBe(true);
+    expect(injectPreviewPicker(fragment, nonce)).toBe(fragment);
+    const upper = injectPreviewPicker("<HTML><BODY>ok</BODY></HTML>", nonce);
+    expect(upper.indexOf("data-rbuilder-picker")).toBeLessThan(upper.indexOf("</BODY>"));
+  });
+
+  test("the injected script is valid JavaScript and closes its own tag", () => {
+    const script = previewPickerScript(nonce);
+    expect(() => new Function(script)).not.toThrow();
+    expect(script).not.toContain("</script");
+    expect(injectPreviewPicker("<body></body>", nonce).split("</script>").length - 1).toBe(1);
+  });
+
+  test("only messages from our own frame are accepted", () => {
+    const payload = { selector: "button.cta", tag: "button" };
+    expect(parsePreviewPickMessage({ data: { type: PREVIEW_PICK, nonce, payload } }, nonce)?.kind).toBe("pick");
+    expect(
+      parsePreviewPickMessage({ data: { type: PREVIEW_PICK, nonce, payload: { tag: "button" } } }, nonce),
+    ).toBeNull();
+    expect(parsePreviewPickMessage({ data: { type: PREVIEW_PICK, nonce: "other", payload } }, nonce)).toBeNull();
+    expect(parsePreviewPickMessage({ data: { type: "iframe-route-change", path: "/" } }, nonce)).toBeNull();
+    expect(parsePreviewPickMessage({ data: "nope" }, nonce)).toBeNull();
+    expect(parsePreviewPickMessage({}, nonce)).toBeNull();
+    expect(parsePreviewPickMessage({ data: { type: PREVIEW_PICK_READY, nonce } }, nonce)).toEqual({
+      kind: "ready",
+    });
+    expect(parsePreviewPickMessage({ data: { type: PREVIEW_PICK_CANCEL, nonce } }, nonce)).toEqual({
+      kind: "cancel",
+    });
+  });
+
+  test("arm messages carry the nonce and the mode", () => {
+    expect(armMessage(nonce, true)).toEqual({ type: PREVIEW_PICK_ARM, nonce, armed: true });
+    expect(armMessage(nonce, false).armed).toBe(false);
+  });
+
+  test("a malformed pick is rejected instead of reaching the prompt", () => {
+    expect(parsePreviewPick(null)).toBeNull();
+    expect(parsePreviewPick("button")).toBeNull();
+    expect(parsePreviewPick({ tag: "button" })).toBeNull();
+    expect(parsePreviewPick({ selector: "   " })).toBeNull();
+  });
+
+  test("payloads are clipped and stripped down before use", () => {
+    const context = parsePreviewPick({
+      selector: "main > button.cta",
+      tag: "button",
+      text: "x".repeat(500),
+      html: "y".repeat(900),
+      classes: Array.from({ length: 20 }, (_, index) => `c${index}`),
+      computed: { display: "inline-flex", "top-secret": "#000" },
+      attributes: { "data-id": "cta", evil: 42 },
+      cssRules: Array.from({ length: 30 }, (_, index) => `.r${index} { color: #111 }`),
+      siblings: ["a", "b", "c", "d", "e", "f", "g"],
+      parent: "section.hero",
+    });
+    expect(context).not.toBeNull();
+    expect(context!.tag).toBe("button");
+    expect(context!.text.length).toBe(161);
+    expect(context!.html!.length).toBe(501);
+    expect(context!.classes.length).toBe(12);
+    expect(context!.computed).toEqual({ display: "inline-flex" });
+    expect(context!.attributes).toEqual({ "data-id": "cta" });
+    expect(context!.cssRules.length).toBe(12);
+    expect(context!.siblings.length).toBe(5);
+    expect(context!.parent).toBe("section.hero");
+  });
+
+  test("a nonce stays unique per preview", () => {
+    const first = createPreviewNonce();
+    expect(first).toMatch(/^rb-[0-9a-z]+-[0-9a-z]+$/);
+    expect(first).not.toBe(createPreviewNonce());
+  });
+
+  /**
+   * The injected collector is real code that runs inside the preview frame, so
+   * it is executed here against a minimal DOM stand-in. The only things stubbed
+   * are the browser APIs it touches.
+   */
+  function runCollector(script: string) {
+    const messages: any[] = [];
+    const windowListeners: Record<string, ((event: any) => void)[]> = {};
+    const documentListeners: Record<string, ((event: any) => void)[]> = {};
+    const document = {
+      body: { tagName: "BODY" },
+      documentElement: { style: {} as Record<string, string> },
+      head: { appendChild: () => {} },
+      styleSheets: [] as unknown[],
+      getElementById: () => null,
+      createElement: () => ({ id: "", textContent: "" }),
+      addEventListener: (type: string, handler: (event: any) => void) => {
+        (documentListeners[type] ??= []).push(handler);
+      },
+    };
+    const window = {
+      parent: { postMessage: (message: unknown) => messages.push(message) },
+      addEventListener: (type: string, handler: (event: any) => void) => {
+        (windowListeners[type] ??= []).push(handler);
+      },
+      getComputedStyle: () => ({
+        getPropertyValue: (key: string) => (key === "display" ? "inline-flex" : ""),
+      }),
+      matchMedia: () => ({ matches: true }),
+      CSS: { escape: (value: string) => value },
+    };
+
+    new Function("window", "document", script)(window, document);
+
+    return {
+      messages,
+      fireWindow: (type: string, event: unknown) =>
+        (windowListeners[type] ?? []).forEach((handler) => handler(event)),
+      fireDocument: (type: string, event: unknown) =>
+        (documentListeners[type] ?? []).forEach((handler) => handler(event)),
+    };
+  }
+
+  const makeElement = (overrides: Record<string, unknown> = {}) => ({
+    tagName: "BUTTON",
+    id: "cta",
+    classList: ["cta"],
+    attributes: [{ name: "data-id", value: "buy" }],
+    parentElement: null,
+    children: [],
+    innerText: "Купить",
+    outerHTML: '<button id="cta">Купить</button>',
+    matches: () => false,
+    setAttribute: () => {},
+    removeAttribute: () => {},
+    ...overrides,
+  });
+
+  test("a click in an armed preview reports the element to the parent", () => {
+    const collector = runCollector(previewPickerScript(nonce));
+    expect(collector.messages).toHaveLength(1);
+    expect(collector.messages[0]).toMatchObject({ type: PREVIEW_PICK_READY, nonce });
+
+    collector.fireDocument("click", {
+      target: makeElement(),
+      preventDefault: () => {},
+      stopPropagation: () => {},
+    });
+    expect(collector.messages).toHaveLength(1);
+
+    collector.fireWindow("message", { data: armMessage(nonce, true) });
+    collector.fireDocument("click", {
+      target: makeElement(),
+      preventDefault: () => {},
+      stopPropagation: () => {},
+    });
+
+    expect(collector.messages).toHaveLength(2);
+    expect(collector.messages[1]).toMatchObject({ type: PREVIEW_PICK, nonce });
+    const context = parsePreviewPick(collector.messages[1].payload);
+    expect(context?.selector).toBe("#cta");
+    expect(context?.text).toBe("Купить");
+    expect(context?.computed).toEqual({ display: "inline-flex" });
+    expect(context?.attributes).toEqual({ "data-id": "buy" });
+  });
+
+  test("a foreign arm message leaves the collector cold", () => {
+    const collector = runCollector(previewPickerScript(nonce));
+    collector.fireWindow("message", { data: { type: PREVIEW_PICK_ARM, nonce: "intruder", armed: true } });
+    collector.fireDocument("click", {
+      target: makeElement(),
+      preventDefault: () => {},
+      stopPropagation: () => {},
+    });
+    expect(collector.messages).toHaveLength(1);
   });
 });
 

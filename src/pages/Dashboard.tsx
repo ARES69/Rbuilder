@@ -13,11 +13,16 @@ import { EXPO_PREVIEW_PATH } from "@/lib/generation-core";
 import { ARCHITECTURES, DEFAULT_ARCHITECTURE_ID } from "@/lib/architecture";
 import { SNIPPETS, SNIPPET_CATEGORIES } from "@/lib/snippets";
 import {
-  collectElementContext,
   formatElementContext,
   pickedElementPrompt,
   type PreviewElementContext,
 } from "@/lib/element-context";
+import {
+  armMessage,
+  createPreviewNonce,
+  injectPreviewPicker,
+  parsePreviewPickMessage,
+} from "@/lib/preview-picker";
 import { publishUrl, shortHost } from "@/lib/deploy";
 import {
   countIssues,
@@ -232,121 +237,6 @@ export default function Dashboard() {
     projectTarget === "expo" ||
     (projectFiles?.some((file) => file.path === EXPO_PREVIEW_PATH) ?? false);
 
-  /**
-   * Stage a picture of the picked element as an attachment.
-   * Best-effort: the structured DOM context is what the agent actually needs,
-   * so a failed snapshot must never block the interaction.
-   */
-  const stageElementScreenshot = async (element: HTMLElement) => {
-    try {
-      const { snapdom } = await import("@zumer/snapdom");
-      const canvas = await snapdom.toCanvas(element, { fast: true });
-      const blob = await (await fetch(canvas.toDataURL("image/png"))).blob();
-      const file = new File([blob], `preview-element-${Date.now()}.png`, {
-        type: "image/png",
-      });
-      setStagedFiles((prev) => [...prev, { id: `shot-${Date.now()}`, file }]);
-    } catch {
-      // Ignored on purpose (see above).
-    }
-  };
-
-  // Attach the element picker to every rendered preview iframe. srcDoc keeps
-  // the document same-origin, so we can inspect it without adding runtime code
-  // to the generated application.
-  useEffect(() => {
-    const iframes = Array.from(
-      document.querySelectorAll<HTMLIFrameElement>("iframe[data-rbuilder-preview]"),
-    );
-    const cleanups: (() => void)[] = [];
-
-    const selectorFor = (element: HTMLElement): string => {
-      if (element.id) return `#${CSS.escape(element.id)}`;
-      const parts: string[] = [];
-      let current: HTMLElement | null = element;
-      while (current && current.tagName.toLowerCase() !== "html") {
-        let part = current.tagName.toLowerCase();
-        if (current.classList.length > 0) {
-          part += `.${Array.from(current.classList).slice(0, 2).map((name) => CSS.escape(name)).join(".")}`;
-        }
-        const parent: HTMLElement | null = current.parentElement;
-        if (parent) {
-          const tagName = current.tagName;
-          const siblings = Array.from(parent.children).filter(
-            (child: Element) => child.tagName === tagName,
-          );
-          const siblingIndex = siblings.indexOf(current);
-          if (siblings.length > 1) part += `:nth-of-type(${siblingIndex + 1})`;
-        }
-        parts.unshift(part);
-        current = parent;
-      }
-      return parts.join(" > ");
-    };
-
-    const bind = (iframe: HTMLIFrameElement) => {
-      const doc = iframe.contentDocument;
-      if (!doc) return;
-      const style = doc.createElement("style");
-      style.dataset.rbuilderPicker = "true";
-      style.textContent = `
-        [data-rbuilder-picker-hover] { outline: 2px solid #3b82f6 !important; outline-offset: 2px !important; cursor: crosshair !important; }
-        [data-rbuilder-picker-selected] { outline: 2px solid #22c55e !important; outline-offset: 2px !important; }
-      `;
-      doc.head.appendChild(style);
-
-      let hovered: HTMLElement | null = null;
-      const clearHover = () => {
-        hovered?.removeAttribute("data-rbuilder-picker-hover");
-        hovered = null;
-      };
-      const onMove = (event: MouseEvent) => {
-        if (!selectingPreviewElement) return;
-        const target = event.target instanceof HTMLElement ? event.target : null;
-        if (!target || target === doc.body || target === doc.documentElement) return;
-        if (hovered !== target) {
-          clearHover();
-          hovered = target;
-          hovered.setAttribute("data-rbuilder-picker-hover", "true");
-        }
-      };
-      const onClick = (event: MouseEvent) => {
-        if (!selectingPreviewElement) return;
-        const target = event.target instanceof HTMLElement ? event.target : null;
-        if (!target || target === doc.body || target === doc.documentElement) return;
-        event.preventDefault();
-        event.stopPropagation();
-        clearHover();
-        target.setAttribute("data-rbuilder-picker-selected", "true");
-        // Collect the full picture — selector, applied CSS, computed styles,
-        // neighbours — so the agent knows exactly what it is changing.
-        const selection = collectElementContext(target, selectorFor(target), doc);
-        setSelectedPreviewElement(selection);
-        const picked = pickedElementPrompt(selection);
-        setInput((current) => `${current.trim()}${current.trim() ? "\n\n" : ""}${picked}`);
-        setSelectingPreviewElement(false);
-        toast.success(`Выбран элемент ${selection.selector}`);
-        // A picture of the element is staged as an attachment, so the model can
-        // compare what the user sees with what the DOM reports.
-        void stageElementScreenshot(target);
-      };
-      doc.addEventListener("mousemove", onMove, true);
-      doc.addEventListener("click", onClick, true);
-      cleanups.push(() => {
-        doc.removeEventListener("mousemove", onMove, true);
-        doc.removeEventListener("click", onClick, true);
-        clearHover();
-        style.remove();
-      });
-    };
-
-    iframes.forEach((iframe) => {
-      if (iframe.contentDocument?.readyState === "complete") bind(iframe);
-      else iframe.addEventListener("load", () => bind(iframe), { once: true });
-    });
-    return () => cleanups.forEach((cleanup) => cleanup());
-  }, [selectingPreviewElement, previewKey, effectiveProjectId]);
-
   useEffect(() => {
     if (!selectingPreviewElement) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -363,6 +253,63 @@ export default function Dashboard() {
     if (projectDetail) return projectDetail;
     return projects?.find((p) => p._id === effectiveProjectId) ?? null;
   }, [projectDetail, projects, effectiveProjectId]);
+
+  // The preview lives in a sandboxed iframe on an opaque origin, so the parent
+  // cannot read its DOM — that is exactly what keeps model-generated code away
+  // from the Tauri IPC. The picker is injected into the document instead and
+  // reports the clicked element back over postMessage; the nonce makes sure
+  // only our own frame is listened to.
+  const previewNonce = useMemo(() => createPreviewNonce(), []);
+  const previewHtml = useMemo(
+    () =>
+      selectedProject?.html
+        ? injectPreviewPicker(selectedProject.html, previewNonce)
+        : undefined,
+    [selectedProject?.html, previewNonce],
+  );
+
+  const previewFrames = () =>
+    Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe[data-rbuilder-preview]"));
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const message = parsePreviewPickMessage(event, previewNonce);
+      if (!message) return;
+
+      // A document that just loaded is disarmed; restore the current mode so
+      // the picker keeps working after a reload or a new generation.
+      if (message.kind === "ready") {
+        previewFrames().forEach((frame) =>
+          frame.contentWindow?.postMessage(armMessage(previewNonce, selectingPreviewElement), "*"),
+        );
+        return;
+      }
+
+      if (message.kind === "cancel") {
+        setSelectingPreviewElement(false);
+        toast.info("Выбор элемента отменён");
+        return;
+      }
+
+      const selection = message.context;
+      setSelectedPreviewElement(selection);
+      const picked = pickedElementPrompt(selection);
+      setInput((current) => `${current.trim()}${current.trim() ? "\n\n" : ""}${picked}`);
+      setSelectingPreviewElement(false);
+      toast.success(`Выбран элемент ${selection.selector}`);
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [previewNonce, selectingPreviewElement]);
+
+  // Arm (or disarm) every rendered preview when the mode changes or the
+  // document is replaced.
+  useEffect(() => {
+    previewFrames().forEach((frame) =>
+      frame.contentWindow?.postMessage(armMessage(previewNonce, selectingPreviewElement), "*"),
+    );
+  }, [previewNonce, selectingPreviewElement, previewKey, previewHtml]);
 
   const sendMessage = useMutation(api.messages.send);
   const commitBuild = useMutation(api.builds.commit);
@@ -1536,7 +1483,7 @@ export default function Dashboard() {
                 <iframe
                   key={previewKey}
                   title="App preview (mobile)"
-                  srcDoc={selectedProject.html}
+                  srcDoc={previewHtml}
                   sandbox="allow-scripts allow-forms allow-modals allow-popups"
                   data-rbuilder-preview="true"
                   className="h-full w-full bg-white"
@@ -1547,7 +1494,7 @@ export default function Dashboard() {
             <iframe
               key={previewKey}
               title="App preview"
-              srcDoc={selectedProject.html}
+              srcDoc={previewHtml}
               sandbox="allow-scripts allow-forms allow-modals allow-popups"
               data-rbuilder-preview="true"
               className={cn(
