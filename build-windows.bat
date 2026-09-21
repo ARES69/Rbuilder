@@ -20,9 +20,11 @@ set EXITCODE=%ERRORLEVEL%
 
 echo.
 if "%EXITCODE%"=="0" (
-  echo Build finished. Installers are here:
+  echo Build finished. Installers - exact paths printed above:
   echo   src-tauri\target\release\bundle\nsis\*-setup.exe
   echo   src-tauri\target\release\bundle\msi\*.msi
+  echo   If the target folder is named after the toolchain, look in
+  echo   src-tauri\target\x86_64-pc-windows-msvc\release\bundle\
   echo Share those files - no Rust/Bun/VS needed on other machines.
 ) else (
   echo Build FAILED with exit code %EXITCODE%. Read the message above,

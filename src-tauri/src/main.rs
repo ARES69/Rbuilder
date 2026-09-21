@@ -1,1 +1,6 @@
-fn main() { rbuilder_desktop_lib::run(); }
+// Prevents an extra console window on Windows in release builds, DO NOT REMOVE.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+fn main() {
+  rbuilder_desktop_lib::run();
+}

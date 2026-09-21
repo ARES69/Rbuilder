@@ -248,6 +248,21 @@ function Build-Project {
   Write-Info "Tauri installer build (several minutes)..."
   & bunx tauri build
   if ($LASTEXITCODE -ne 0) { throw "Tauri build failed." }
+
+  # Tauri may place bundles under the target triple folder
+  # (src-tauri\target\x86_64-pc-windows-msvc\release\bundle), so report the
+  # files that actually exist instead of guessing the path.
+  $installers = @(
+    Get-ChildItem -Path "src-tauri\target" -Recurse -Include *.msi,*-setup.exe -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -match "\\bundle\\" } |
+      Sort-Object LastWriteTime -Descending
+  )
+  if ($installers.Count -gt 0) {
+    Write-Ok "Installers:"
+    $installers | ForEach-Object { Write-Host "  $($_.FullName)" -ForegroundColor Green }
+  } else {
+    Write-Info "No .msi/-setup.exe found under src-tauri\target - read the build output above."
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -288,9 +303,9 @@ try {
   Write-Host ""
   Write-Host "========================================" -ForegroundColor Green
   if ($Build) {
-    Write-Host "  DONE. Installers:" -ForegroundColor Green
-    Write-Host "  src-tauri\target\release\bundle\nsis\*-setup.exe" -ForegroundColor Green
-    Write-Host "  src-tauri\target\release\bundle\msi\*.msi" -ForegroundColor Green
+    Write-Host "  DONE. Installers (exact paths printed above):" -ForegroundColor Green
+    Write-Host "  src-tauri\target\*\release\bundle\nsis\*-setup.exe" -ForegroundColor Green
+    Write-Host "  src-tauri\target\*\release\bundle\msi\*.msi" -ForegroundColor Green
   } else {
     Write-Host "  Environment ready. Run build-windows.bat to build installers." -ForegroundColor Green
     Write-Host "  Dev mode: bun tauri dev" -ForegroundColor Green

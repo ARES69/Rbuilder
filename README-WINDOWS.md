@@ -5,7 +5,9 @@
 **RBuilder Desktop** — нативное Windows-приложение (Tauri 2 + WebView2).
 
 После сборки появляются готовые инсталляторы в
-`src-tauri\target\release\bundle\`:
+`src-tauri\target\release\bundle\` — а если Tauri использовал папку с именем
+тулчейна, то в `src-tauri\target\x86_64-pc-windows-msvc\release\bundle\`.
+Скрипт сборки печатает точные пути в конце своей работы:
 
 - `msi\RBuilder_0.1.0_x64_en-US.msi` — классический установщик Windows;
 - `nsis\RBuilder_0.1.0_x64-setup.exe` — установщик с ярлыками и деинсталлятором.
@@ -29,7 +31,8 @@ Visual Studio: только сам файл и WebView2 (есть на любо�
    Visual Studio C++ Build Tools, WebView2, зависимости проекта.
 3. Когда всё готово — двойный клик по **`build-windows.bat`**:
    проверки → веб-сборка → инсталляторы.
-4. Запустите установщик из `src-tauri\target\release\bundle\nsis\`.
+4. Запустите установщик — точный путь напечатан в конце вывода `build-windows.bat`
+   (обычно `src-tauri\target\release\bundle\nsis\`).
 
 Что делать при проблемах — см. «Если что-то пошло не так» ниже.
 

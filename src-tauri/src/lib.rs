@@ -76,8 +76,26 @@ fn git_branches(root: String) -> Result<Vec<String>, String> { Ok(git(&root, &["
 #[tauri::command] fn git_push(root: String) -> Result<CommandResult, String> { git(&root, &["push"]) }
 #[tauri::command] fn git_stash(root: String) -> Result<CommandResult, String> { git(&root, &["stash", "push", "-u"]) }
 
+/// The read-only allow-list below uses POSIX names, which Windows does not
+/// ship. They are mapped to native equivalents so the Desktop terminal panel
+/// behaves the same on both platforms.
+fn native_command(command: &str) -> (String, Vec<String>) {
+    #[cfg(windows)]
+    {
+        let translated: Option<(&str, &[&str])> = match command {
+            "ls" => Some(("cmd", &["/C", "dir"])),
+            "pwd" => Some(("cmd", &["/C", "cd"])),
+            "find" => Some(("cmd", &["/C", "dir", "/s", "/b"])),
+            _ => None,
+        };
+        if let Some((program, flags)) = translated {
+            return (program.to_string(), flags.iter().map(|flag| (*flag).to_string()).collect());
+        }
+    }
+    (command.to_string(), Vec::new())
+}
 #[tauri::command]
-fn terminal_run(root: String, command: String, args: Vec<String>, approved: bool) -> Result<CommandResult, String> { if command.len() > 64 || args.len() > 32 || command.contains('/') || args.iter().any(|arg| arg.len() > 512 || arg.chars().any(|c| matches!(c, ';' | '|' | '&' | '>' | '<' | '$'))) { return Err("Команда содержит запрещённые элементы".into()); } let safe = matches!(command.as_str(), "pwd" | "ls" | "find" | "git" | "bun" | "npm" | "pnpm"); if !approved && !safe { return Err("Команда требует подтверждения".into()); } let dir = fs::canonicalize(root).map_err(|e| e.to_string())?; let out = Command::new(command).args(args).current_dir(dir).output().map_err(|e| e.to_string())?; let limit = 256 * 1024; let stdout = String::from_utf8_lossy(&out.stdout[..out.stdout.len().min(limit)]).into(); let stderr = String::from_utf8_lossy(&out.stderr[..out.stderr.len().min(limit)]).into(); Ok(CommandResult { code: out.status.code().unwrap_or(-1), stdout, stderr }) }
+fn terminal_run(root: String, command: String, args: Vec<String>, approved: bool) -> Result<CommandResult, String> { if command.len() > 64 || args.len() > 32 || command.contains('/') || args.iter().any(|arg| arg.len() > 512 || arg.chars().any(|c| matches!(c, ';' | '|' | '&' | '>' | '<' | '$'))) { return Err("Команда содержит запрещённые элементы".into()); } let safe = matches!(command.as_str(), "pwd" | "ls" | "find" | "git" | "bun" | "npm" | "pnpm"); if !approved && !safe { return Err("Команда требует подтверждения".into()); } let dir = fs::canonicalize(root).map_err(|e| e.to_string())?; let (program, mut argv) = native_command(&command); argv.extend(args); let out = Command::new(&program).args(argv).current_dir(dir).output().map_err(|e| e.to_string())?; let limit = 256 * 1024; let stdout = String::from_utf8_lossy(&out.stdout[..out.stdout.len().min(limit)]).into(); let stderr = String::from_utf8_lossy(&out.stderr[..out.stderr.len().min(limit)]).into(); Ok(CommandResult { code: out.status.code().unwrap_or(-1), stdout, stderr }) }
 #[tauri::command]
 fn preview_start(state: State<'_, AppState>, root: String, command: Option<String>) -> Result<serde_json::Value, String> { if TcpListener::bind("127.0.0.1:5173").is_err() { return Err("Порт 5173 уже занят".into()); } let dir = fs::canonicalize(root).map_err(|e| e.to_string())?; let line = command.unwrap_or_else(|| "bun run dev".into()); let mut parts = line.split_whitespace(); let executable = parts.next().ok_or("Команда пуста")?; let child = Command::new(executable).args(parts).current_dir(&dir).spawn().map_err(|e| e.to_string())?; let pid = child.id(); state.processes.lock().map_err(|_| "Process manager недоступен")?.insert(pid, ProcessRecord { child, kind: "preview".into(), command: line, root: dir.to_string_lossy().into() }); Ok(serde_json::json!({"url":"http://localhost:5173","pid":pid})) }
 #[tauri::command]
