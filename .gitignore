@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+
+# Scratch copy of the generated project used by the terminal
+.freebuff-workspace

@@ -1,0 +1,211 @@
+# RBUILDER
+
+Chat with an agent on the left, watch the web app it writes render live on the right — and let
+the agent check its own work instead of asking you to look.
+
+```
+┌──────────────────────────────┬──────────────────────────────────────┐
+│ Chat                         │ Preview                              │
+│ transcript, attachments,     │ the project's index.html, rebuilt    │
+│ checklist, tool trace        │ as files land                        │
+│                              ├──────────────────────────────────────┤
+│                              │ Dock: Files · Console · Checks ·     │
+│                              │       Terminal                       │
+│ composer · Build/Plan        │                                      │
+└──────────────────────────────┴──────────────────────────────────────┘
+```
+
+## Requirements
+
+- Node.js 20.19+ (24 recommended)
+- pnpm
+
+## Quick start
+
+```bash
+pnpm install
+cp .env.example .env.local   # then put your key in it
+pnpm dev
+```
+
+Open the URL Vite prints (default http://localhost:5173). No key yet? The app still runs: the
+chat explains how to configure one and the preview keeps rendering the starter project.
+
+## The model
+
+Freebuff Web talks to **any OpenAI-compatible chat completions endpoint**. Configure it in
+`.env.local`:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | — | Required. Absent ⇒ the app runs in unconfigured mode. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI, OpenRouter, Groq, Ollama, LM Studio… |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Any model id the endpoint accepts. |
+
+The key is read by the dev server only. The browser never receives it: it learns just whether a
+model is configured and which model id is in use. Endpoints that ignore `stream: true` are
+handled, and tool calling is used in build mode (a provider without it still works — you just
+lose the self-checking).
+
+## What it does
+
+**Chat.** Plain prose replies, streamed as they arrive. Stop a turn at any time.
+
+**Attach any file.** The paperclip button accepts any type, and files can be dropped onto the
+chat. Text-like files (code, markdown, JSON, CSV, …) are read and handed to the model inline as
+context, truncated at 64 KB. Anything else is passed as name, type and size, and the model is
+told the contents were not read.
+
+**Live preview.** Files the agent writes go into an in-memory project. The preview builds that
+project into one document — linked stylesheets and `<script src>` files are inlined, because a
+sandboxed `srcdoc` document cannot resolve relative URLs — and renders it in an iframe. Rebuilds
+happen as file blocks finish streaming. Refresh re-mounts the frame; **Open** opens the current
+build in a new tab.
+
+**The agent can look at the page.** The preview carries a small injected runtime that records
+console output, runtime errors, rejected promises and failed requests, and answers requests from
+the page over `postMessage`. The model gets four tools:
+
+| Tool | What it does |
+| --- | --- |
+| `inspect_preview` | page title, visible text, an outline of headings/text/interactive elements with selectors, console tail, errors, failed requests |
+| `interact_with_preview` | click, type or press a key — targeting a selector or visible text — and report what changed |
+| `read_project_file` | full current contents of one file |
+| `run_checks` | the project checks below |
+
+A turn is bounded by a budget the agent manages itself — by default 5 minutes and 200k tokens —
+not by a fixed round cap. The model is told what is left at every step and paces itself; when the
+budget is nearly spent, tools are withdrawn so the turn lands with a summary instead of dying
+mid-thought. A run that needs twenty inspections gets them; one stuck in a loop does not burn them
+endlessly (a runaway guard far beyond any real budget guarantees termination). The chat shows the
+same numbers live — time left, tokens used, steps taken — with a Stop button that ends the turn at
+once. Token counts are exact when the provider reports usage (`stream_options.include_usage`) and
+estimated from text volume otherwise.
+Every call appears as a row in the chat you can expand to see exactly what came back.
+
+**Dock.**
+
+- **Files** — browse the generated project, edit a file by hand and Save (the preview rebuilds),
+  delete, or send it to the agent with "Ask".
+- **Console** — everything the preview logged, plus an evaluate line that runs JavaScript in the
+  page, a Clear button, and **Ask Freebuff to fix** which sends the captured errors as the next
+  turn. The tab badge counts problems. The header shows the same count.
+- **Checks** — HTML structure and referenced files, CSS brace balance and JavaScript syntax (the
+  code is parsed with the `Function` constructor, never executed). Same "Ask Freebuff to fix".
+- **Terminal** — a real shell command in a scratch copy of the project
+  (`.freebuff-workspace/project/`), streamed back line by line.
+
+**Plan mode.** The Build/Plan switch sits in the composer. In plan mode no tools are offered and
+**file blocks are not applied**: you get an approach plus a checklist, and nothing changes until
+you press **Approve & build**, which switches to build mode and tells the agent to work the list.
+The checklist is re-emitted each turn and rendered with progress above the composer.
+
+**Persistence.** Transcript, project, plan and mode are saved to `localStorage`; a reload keeps
+all of it. Terminal output and check results are session-only. **New project** starts over.
+
+**Resizable panes.** Drag the divider, or focus it and use ←/→. The width is remembered.
+
+## How a turn works
+
+1. The browser sends the whole transcript (including previous tool calls and their results) plus
+   the current file list to `POST /api/chat`, along with the mode.
+2. The proxy adds the system prompt and, in build mode, the tool definitions, then streams one
+   provider step back as newline-delimited JSON: `meta`, `delta`, `tool_call`, then `done`.
+3. Each delta is re-parsed. Completed file blocks are written into the project — which rebuilds
+   the preview — and removed from the prose; completed plan blocks become the checklist. Nothing
+   is applied from a file block that has not closed yet.
+4. If the step asked for tools, the browser runs them (inspecting the live frame, reading the
+   project, running the checks), appends the results, and asks for the next step.
+
+The proxy is stateless and the loop lives in the browser, because only the page can see its own
+project and preview.
+
+## External APIs (Bitrix24, amoCRM, Yandex, any REST service)
+
+The preview runs in a sandboxed frame with an opaque origin, so a generated app cannot call a
+third-party host directly — every such request dies on CORS. Instead the agent writes apps that
+call the dev-server passthrough:
+
+```js
+const response = await fetch('/api/proxy', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    url: 'https://company.bitrix24.ru/rest/1/xxxx/crm.lead.add.json',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { NAME: 'Ivan' } }),
+  }),
+})
+```
+
+The envelope is `{ url, method?, headers?, body?, timeoutMs? }`; the upstream response comes back
+verbatim with its original status and content type, so JSON, XML and webhook payloads all work.
+The system prompt teaches the agent this pattern, including webhook-style services (Bitrix24
+inbound webhooks, Telegram bots) where the key lives in the URL.
+
+Safety: requests to private and local network addresses (loopback, 10/8, 172.16/12, 192.168/16,
+169.254/16, CGNAT, `.local`) are refused — including hostnames that resolve to them, which closes
+direct SSRF and DNS rebinding. Hop-by-hop request headers (`Host`, `Content-Length`, cookies) are
+stripped, upstream `Set-Cookie` and CORS headers are not forwarded. To test against a service on
+your own machine, start the dev server with `PROXY_ALLOW_PRIVATE=1`. Bodies and responses are
+capped at 10 MB; upstream calls time out after 20s (envelope can raise to 60s).
+
+## Guardrails, honestly stated
+
+- The preview iframe is sandboxed with `allow-scripts allow-forms allow-modals allow-popups` and
+  **without** `allow-same-origin`, so the generated app cannot touch this page. The parent reaches
+  it only over `postMessage`, and every reply carries a channel derived from the project, so a
+  frame that has been rebuilt cannot answer for the current preview.
+- Generated JavaScript is only *parsed* by the checks — the app's own code is never executed
+  outside the sandboxed frame.
+- The terminal is a local developer tool with your own permissions, not a sandbox. Privileged
+  commands (`sudo`, `doas`, `pkexec`, `-Verb RunAs`), fork bombs, disk writes, `git push` and
+  deletes aimed outside the workspace are refused; commands have a 20 s timeout and 64 KB output
+  cap. Anything stronger needs a container.
+- The agent has no shell tool: it can run the checks, not your machine.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | Dev server with the `/api/chat` and `/api/exec` middleware (the supported way to run it) |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm test` | Vitest: project, protocol, attachments, markdown, checks and the preview runtime |
+| `pnpm build` | Production build of the front end (no API middleware) |
+
+## Layout
+
+```
+server/chat-proxy.ts       /api/chat (provider + tools) and /api/exec (terminal)
+server/workspace.ts        scratch workspace, command runner, guardrails
+src/App.tsx                turn lifecycle, tool execution, checks, terminal wiring
+src/lib/protocol.ts        prompts, stream events, file/plan parsers, tool schemas
+src/lib/previewRuntime.ts  the script injected into the preview
+src/lib/inspector.ts       parent side: event log, request/response, channels
+src/lib/tools.ts           executes model tool calls
+src/lib/checks.ts          HTML/CSS/JS checks
+src/lib/turn.ts            the multi-step turn loop
+src/lib/project.ts         virtual project, path safety, preview document builder
+src/lib/agent.ts           browser side of both streams
+src/lib/attachments.ts     file reading, text detection, truncation
+src/lib/store.ts           reducer + localStorage persistence
+src/components/            SplitLayout, ChatPanel, MessageList, Markdown, Composer,
+                           AttachmentChips, PreviewPane, Dock, PlanPanel
+src/styles/global.css      Minimalism theme (near-monochrome, hairline rules, dark mode)
+tests/                     Vitest suites
+```
+
+## Debugging the preview
+
+In dev the page exposes two aids:
+
+- `window.__freebuffTrace` — recent inspector posts and receives, with channel and attach counts.
+  That is how the "tool ran against the previous document" class of bug was found.
+- `window.__freebuffDebug` — the live inspector and the current channel.
+
+## Not included
+
+Accounts and auth, a model picker, sessions and quotas, hosting and deployment, containers or a
+sandboxed terminal, multi-page apps and routing, git integration. The preview renders one
+self-contained HTML project; a build step and npm dependencies are out of scope by design.

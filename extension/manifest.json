@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "RBUILDER Browser Bridge",
+  "version": "0.1.0",
+  "description": "Connect an explicitly selected Qwen or DeepSeek tab to RBUILDER without reading cookies or tokens.",
+  "permissions": ["tabs", "scripting", "storage"],
+  "host_permissions": ["http://localhost:5185/*", "http://localhost:5173/*", "https://qwen.ai/*", "https://*.qwen.ai/*", "https://chat.deepseek.com/*", "https://*.deepseek.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["http://localhost:5185/*", "http://localhost:5173/*", "https://qwen.ai/*", "https://*.qwen.ai/*", "https://chat.deepseek.com/*", "https://*.deepseek.com/*"],
+    "js": ["bridge.js"],
+    "run_at": "document_idle"
+  }],
+  "action": { "default_title": "RBUILDER Browser Bridge" }
+}

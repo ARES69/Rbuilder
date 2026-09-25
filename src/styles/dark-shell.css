@@ -1,0 +1,26 @@
+.app { background: #061522; color: #e7f1fb; }
+.sidebar { background: #061522; color: #e7f1fb; border-right: 1px solid #173047; }
+.sidebar-brand { border-color: #173047; }
+.sidebar-link { color: #a5bfd1; }
+.sidebar-link:hover { background: #0b2a40; color: #fff; }
+.sidebar-link--active { background: #0d3150; color: #fff; }
+.sidebar-icon { color: #79a1bd; }
+.sidebar-bottom { border-color: #173047; }
+.new-project { border-color: #2a4a62; background: #092237; color: #f0f7fc; }
+.new-project:hover { background: #103650; }
+.main-shell { background: #061522; }
+.main-shell > .topbar { background: #061522; border-color: #173047; color: #e7f1fb; }
+.main-shell .breadcrumb { color: #e7f1fb; }
+.main-shell .breadcrumb-muted, .main-shell .topbar-mode, .main-shell .topbar-model { color: #7f9bb0; }
+.main-shell .topbar-mode { border-color: #173047; }
+.desktop-home { background: #061522; color: #e7f1fb; }
+.desktop-home h1, .desktop-home h2, .desktop-home h3, .desktop-home strong { color: #e7f1fb; }
+.desktop-home .desktop-kicker, .desktop-home .desktop-subtitle, .desktop-home .desktop-section-head p, .desktop-home .desktop-muted, .desktop-home .agent-card p, .desktop-home .agent-model, .desktop-home .workspace-card-main span, .desktop-home .workspace-branch, .desktop-home .desktop-tip p { color: #86a2b9; }
+.desktop-home .agent-card, .desktop-home .workspace-card { border-color: #173047; background: #092237; box-shadow: 0 8px 28px rgba(0,0,0,.16); }
+.desktop-home .agent-avatar, .desktop-home .desktop-tip-icon, .desktop-home .workspace-card-icon { border-color: #2a4a62; background: #102d43; color: #dceaf5; }
+.desktop-home .agent-status { color: #7895aa; }
+.desktop-home .agent-action { color: #dceaf5; }
+.desktop-home .desktop-tip { border-color: #173047; background: #092237; }
+.desktop-home .button--quiet { border-color: #2a4a62; color: #b9ccda; }
+.desktop-home .button--quiet:hover:not(:disabled) { background: #123650; color: #fff; }
+.sidebar-reopen { background: #092237; }
