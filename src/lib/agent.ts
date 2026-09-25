@@ -5,6 +5,7 @@
  */
 
 import type { AgentMode, ChatTurn, StreamEvent, ToolCall } from './protocol'
+import { apiUrl } from './apiBase'
 
 export type ProviderProfile = {
   id: string
@@ -46,7 +47,7 @@ export const DEFAULT_PROVIDER_PROFILES: ProviderProfile[] = [
 
 export async function testProvider(profile: ProviderProfile, signal?: AbortSignal): Promise<{ ok: boolean; models: string[]; error?: string }> {
   try {
-    const response = await fetch('/api/provider-test', {
+    const response = await fetch(apiUrl('/api/provider-test'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: profile }),
@@ -80,13 +81,14 @@ export type StepResult = {
 }
 
 export const UNCONFIGURED_HINT =
-  'RBUILDER needs a model to write your app. Add OPENAI_API_KEY (and optionally ' +
-  'OPENAI_BASE_URL / OPENAI_MODEL) to .env.local, then restart `pnpm dev`. ' +
-  'The preview keeps rendering the project in the meantime.'
+  'RBUILDER needs a model to write your app. Open Settings and pick a provider — ' +
+  'Ollama and LM Studio run on this machine and need no key. To use a hosted model ' +
+  'instead, add OPENAI_API_KEY (optionally OPENAI_BASE_URL / OPENAI_MODEL) to ' +
+  '.env.local and restart the server. The preview keeps rendering the project in the meantime.'
 
 export async function fetchAgentConfig(signal?: AbortSignal): Promise<AgentConfig> {
   try {
-    const response = await fetch('/api/chat', { method: 'GET', signal })
+    const response = await fetch(apiUrl('/api/chat'), { method: 'GET', signal })
     if (!response.ok) return { configured: false }
     const data = (await response.json()) as { configured?: boolean; model?: string }
     return { configured: Boolean(data.configured), model: data.model }
@@ -103,7 +105,7 @@ export async function streamStep(
 ): Promise<StepResult> {
   let response: Response
   try {
-    response = await fetch('/api/chat', {
+    response = await fetch(apiUrl('/api/chat'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -191,7 +193,7 @@ export async function execCommand(
 ): Promise<{ ok: boolean; error?: string }> {
   let response: Response
   try {
-    response = await fetch('/api/exec', {
+    response = await fetch(apiUrl('/api/exec'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command, files }),

@@ -43,7 +43,8 @@ export function createWorkspace(project: Project, name = 'Untitled project', loc
   const baseline = cloneProject(project)
   return {
     metadata: {
-      id: `workspace_${now.toString(36)}`,
+      // Two workspaces created in the same millisecond still need distinct ids.
+      id: `workspace_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       name,
       localPath,
       architecture: null,
@@ -77,4 +78,65 @@ export function projectFromWorkspaceFiles(files: ProjectFile[]): Project {
 export function changedWorkspaceFiles(workspace: Workspace): ProjectFile[] {
   const before = new Map(workspace.baseline.files.map((file) => [file.path, file.content]))
   return workspace.project.files.filter((file) => before.get(file.path) !== file.content)
+}
+
+/** Which workspace was open, so a reload does not invent a new one. */
+export const ACTIVE_WORKSPACE_STORAGE_KEY = 'rbuilder-workspaces:active'
+
+export type WorkspaceStorage = Pick<Storage, 'getItem'>
+export type WritableWorkspaceStorage = Pick<Storage, 'getItem' | 'setItem'>
+
+/**
+ * Two workspaces with the same name and the same files are the same workspace:
+ * a reload used to append a copy of the open project on every visit.
+ */
+export function workspaceSignature(workspace: Workspace): string {
+  return JSON.stringify([workspace.metadata.name, workspace.project.files])
+}
+
+export function dedupeWorkspaces(entries: Workspace[]): Workspace[] {
+  const seen = new Set<string>()
+  return entries.filter((entry) => {
+    const key = workspaceSignature(entry)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/** Reads the saved workspace list, keeping only entries that look intact. */
+export function readStoredWorkspaces(storage: WorkspaceStorage): Workspace[] {
+  try {
+    const raw = storage.getItem(WORKSPACE_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Workspace[]
+    if (!Array.isArray(parsed)) return []
+    return dedupeWorkspaces(parsed.filter((entry) => entry?.metadata?.id && entry.project?.files))
+  } catch {
+    return []
+  }
+}
+
+export function readActiveWorkspaceId(storage: WorkspaceStorage): string | null {
+  try {
+    return storage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function rememberActiveWorkspace(storage: WritableWorkspaceStorage, id: string): void {
+  try {
+    storage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, id)
+  } catch {
+    /* the history is a convenience; keep working in memory */
+  }
+}
+
+export function saveStoredWorkspaces(storage: WritableWorkspaceStorage, entries: Workspace[]): void {
+  try {
+    storage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(entries))
+  } catch {
+    /* local-only history */
+  }
 }

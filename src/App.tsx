@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { AgentsView } from './components/AgentsView'
 import { ChatPanel } from './components/ChatPanel'
 import { CodeWorkbench } from './components/CodeWorkbench'
 import { DesktopHome } from './components/DesktopHome'
+import { ProjectsView } from './components/ProjectsView'
+import { PublishView } from './components/PublishView'
 import { SettingsPanel } from './components/SettingsPanel'
 import { BrowserSessionPanel } from './components/BrowserSessionPanel'
 import { PreviewPane, type DockTab } from './components/PreviewPane'
 import { DEFAULT_PROVIDER_PROFILES, execCommand, fetchAgentConfig, type ProviderProfile } from './lib/agent'
+import { apiBase, isDesktop, serverLabel } from './lib/apiBase'
+import { pickProjectFolder, type ImportedFolder } from './lib/desktop'
+import { GIT_CHANGED_EVENT, readGitState } from './lib/git'
 import { attachmentsToContext, type AttachmentMeta } from './lib/attachments'
 import type { Budget } from './lib/budget'
-import { runChecks, type ChecksResult } from './lib/checks'
+import { runChecks, summarizeChecks, type ChecksResult } from './lib/checks'
 import { channelFor, PreviewInspector } from './lib/inspector'
 import {
   buildPreviewDocument,
@@ -19,7 +25,15 @@ import {
   type Project,
 } from './lib/project'
 import { RUNTIME_SCRIPT } from './lib/previewRuntime'
-import { createWorkspace, projectFromWorkspaceFiles, type Workspace } from './lib/workspace'
+import {
+  createWorkspace,
+  projectFromWorkspaceFiles,
+  readActiveWorkspaceId,
+  readStoredWorkspaces,
+  rememberActiveWorkspace,
+  saveStoredWorkspaces,
+  type Workspace,
+} from './lib/workspace'
 import { describeCall, executeTool, type ToolOutcome } from './lib/tools'
 import { runAgentTurn } from './lib/turn'
 import type { AgentMode, ChatTurn } from './lib/protocol'
@@ -32,6 +46,12 @@ import {
   type ChatMessage,
 } from './lib/store'
 
+type View = 'home' | 'workspace' | 'projects' | 'agents' | 'publish'
+type NavId = 'home' | 'projects' | 'agents' | 'publish' | 'settings'
+
+/** What the sidebar reports about the terminal workspace, straight from git. */
+type GitSummary = { isRepo: boolean; branch: string | null; changes: number; lastCommit: string | null }
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, undefined, loadState)
   const [busy, setBusy] = useState(false)
@@ -39,16 +59,24 @@ export default function App() {
   const [budget, setBudget] = useState<{ budget: Budget; wrappingUp: boolean } | null>(null)
   const [dockTab, setDockTab] = useState<DockTab>('files')
   const [runningChecks, setRunningChecks] = useState(false)
-  const [view, setView] = useState<'home' | 'workspace'>('home')
-  const [activeNav, setActiveNav] = useState<'home' | 'projects' | 'templates' | 'agents' | 'deployments' | 'settings'>('home')
+  const [view, setView] = useState<View>('home')
+  const [activeNav, setActiveNav] = useState<NavId>('home')
+  const [importing, setImporting] = useState(false)
+  const [git, setGit] = useState<GitSummary | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [browserSessionOpen, setBrowserSessionOpen] = useState(false)
   const [providers, setProviders] = useState<ProviderProfile[]>(loadProviderProfiles)
   const [activeProviderId, setActiveProviderId] = useState(() => loadActiveProviderId())
   const [baselineProject, setBaselineProject] = useState<Project>(() => loadState().project)
-  const [workspace, setWorkspace] = useState<Workspace>(() => createWorkspace(loadState().project))
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(loadSavedWorkspaces)
+  // The workspace that was open comes back as it was: a fresh id on every reload
+  // is what used to fill the project list with copies of the same project.
+  const [workspace, setWorkspace] = useState<Workspace>(() => {
+    const saved = readStoredWorkspaces(window.localStorage)
+    const activeId = readActiveWorkspaceId(window.localStorage)
+    return saved.find((entry) => entry.metadata.id === activeId) ?? createWorkspace(loadState().project)
+  })
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(() => readStoredWorkspaces(window.localStorage))
 
   // The channel is a function of the project, so every build has its own and a
   // replaced frame cannot answer for the current preview.
@@ -81,10 +109,12 @@ export default function App() {
       const next = entries.some((entry) => entry.metadata.id === current.metadata.id)
         ? entries.map((entry) => entry.metadata.id === current.metadata.id ? current : entry)
         : [current, ...entries].slice(0, 12)
-      try { localStorage.setItem('rbuilder-workspaces:v1', JSON.stringify(next)) } catch { /* local-only history */ }
+      saveStoredWorkspaces(window.localStorage, next)
       return next
     })
   }, [state.project])
+
+  useEffect(() => rememberActiveWorkspace(window.localStorage, workspace.metadata.id), [workspace.metadata.id])
 
   useEffect(() => {
     try {
@@ -96,6 +126,33 @@ export default function App() {
   }, [activeProviderId, providers])
 
   useEffect(() => inspector.connect(), [inspector])
+
+  // The sidebar reports what the terminal workspace really is.
+  const refreshGit = useCallback(() => {
+    const files = projectRef.current.files.map((file) => ({ path: file.path, content: file.content }))
+    void readGitState(files).then((next) =>
+      setGit({
+        isRepo: next.isRepo,
+        branch: next.branch,
+        changes: next.changes.length,
+        lastCommit: next.lastCommit,
+      }),
+    )
+  }, [])
+
+  // It runs after a turn lands rather than during one, so a stream of file writes
+  // does not spawn a git command each time.
+  useEffect(() => {
+    if (busy) return
+    const timer = window.setTimeout(refreshGit, 1_200)
+    return () => window.clearTimeout(timer)
+  }, [busy, refreshGit, state.project.files])
+
+  // The Git panel works in the same workspace and says when it changed something.
+  useEffect(() => {
+    window.addEventListener(GIT_CHANGED_EVENT, refreshGit)
+    return () => window.removeEventListener(GIT_CHANGED_EVENT, refreshGit)
+  }, [refreshGit])
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -251,17 +308,33 @@ export default function App() {
     setView('workspace')
   }, [workspaces, workspace.metadata.id])
 
-  const changeBranch = useCallback((branch: string) => {
-    setWorkspace((current) => {
-      const next = { ...current, metadata: { ...current.metadata, activeBranch: branch, updatedAt: Date.now() } }
-      setWorkspaces((entries) => {
-        const saved = entries.map((entry) => entry.metadata.id === next.metadata.id ? next : entry)
-        try { localStorage.setItem('rbuilder-workspaces:v1', JSON.stringify(saved)) } catch { /* local-only history */ }
-        return saved
-      })
-      return next
+  const renameWorkspace = useCallback((id: string, name: string) => {
+    setWorkspaces((entries) => {
+      const saved = entries.map((entry) =>
+        entry.metadata.id === id
+          ? { ...entry, metadata: { ...entry.metadata, name, updatedAt: Date.now() } }
+          : entry,
+      )
+      saveStoredWorkspaces(window.localStorage, saved)
+      return saved
     })
+    setWorkspace((current) =>
+      current.metadata.id === id
+        ? { ...current, metadata: { ...current.metadata, name, updatedAt: Date.now() } }
+        : current,
+    )
   }, [])
+
+  const deleteWorkspace = useCallback(
+    (id: string) => {
+      const remaining = workspaces.filter((entry) => entry.metadata.id !== id)
+      if (remaining.length === 0) return
+      saveStoredWorkspaces(window.localStorage, remaining)
+      setWorkspaces(remaining)
+      if (workspace.metadata.id === id) switchWorkspace(remaining[0]!.metadata.id)
+    },
+    [switchWorkspace, workspace.metadata.id, workspaces],
+  )
 
   const reset = useCallback(() => {
     if (busyRef.current) return
@@ -283,12 +356,34 @@ export default function App() {
   }, [inspector])
 
   const openLocalFolder = useCallback(async () => {
+    // The desktop shell reads the folder natively: WebView2 has no File System
+    // Access API, so the browser path below cannot work there.
+    if (isDesktop()) {
+      setImporting(true)
+      try {
+        const folder: ImportedFolder | null = await pickProjectFolder()
+        if (folder && folder.files.length > 0) {
+          const imported = projectFromWorkspaceFiles(folder.files)
+          setBaselineProject(imported)
+          setWorkspace(createWorkspace(imported, folder.name, folder.name))
+          applyFiles(imported.files)
+        }
+        setView('workspace')
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : 'Не удалось открыть папку.')
+      } finally {
+        setImporting(false)
+      }
+      return
+    }
+
     const picker = (window as unknown as { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker
     if (!picker) {
       window.alert('Folder access is not supported by this browser. Use Chrome or Edge.')
       return
     }
 
+    setImporting(true)
     try {
       const root = (await picker()) as {
         name: string
@@ -318,7 +413,9 @@ export default function App() {
       setView('workspace')
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
-      window.alert(error instanceof Error ? error.message : 'Could not open the folder.')
+      window.alert(error instanceof Error ? error.message : 'Не удалось открыть папку.')
+    } finally {
+      setImporting(false)
     }
   }, [applyFiles])
 
@@ -371,14 +468,10 @@ export default function App() {
     [],
   )
 
-  const deployProject = useCallback(() => {
-    setView('workspace')
-    setDockTab('terminal')
-    void runTerminalCommand('pnpm build')
-  }, [runTerminalCommand])
-
   const previewDocument = useMemo(
-    () => buildPreviewDocument(state.project, { channel, script: RUNTIME_SCRIPT }),
+    // The preview needs the API address of the desktop shell: its generated apps
+    // call `/api/proxy` from an opaque origin, where a relative URL means nothing.
+    () => buildPreviewDocument(state.project, { channel, script: RUNTIME_SCRIPT, apiBase: apiBase() }),
     [state.project, channel],
   )
   const filePaths = useMemo(() => projectFilePaths(state.project), [state.project])
@@ -418,17 +511,20 @@ export default function App() {
           <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'home' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('home'); setView('home') }}>
             <span className="sidebar-icon" aria-hidden="true">⌂</span> Главная
           </button>
-          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'projects' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('projects'); setView('workspace') }}>
+          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'projects' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('projects'); setView('projects') }}>
             <span className="sidebar-icon" aria-hidden="true">▣</span> Проекты
           </button>
-          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'templates' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('templates'); void openLocalFolder() }} disabled={busy}>
-            <span className="sidebar-icon" aria-hidden="true">◇</span> Открыть папку
+          <button type="button" className="sidebar-link sidebar-link--button" onClick={() => { setActiveNav('home'); setView('workspace') }}>
+            <span className="sidebar-icon" aria-hidden="true">▤</span> Рабочая область
           </button>
-          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'agents' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('agents'); setView('home') }}>
+          <button type="button" className="sidebar-link sidebar-link--button" onClick={() => void openLocalFolder()} disabled={busy || importing}>
+            <span className="sidebar-icon" aria-hidden="true">◇</span> {importing ? 'Импорт…' : 'Открыть папку'}
+          </button>
+          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'agents' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('agents'); setView('agents') }}>
             <span className="sidebar-icon" aria-hidden="true">♙</span> Агенты
           </button>
-          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'deployments' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('deployments'); deployProject() }} disabled={busy}>
-            <span className="sidebar-icon" aria-hidden="true">◇</span> Публикации
+          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'publish' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('publish'); setView('publish') }}>
+            <span className="sidebar-icon" aria-hidden="true">↑</span> Публикация
           </button>
           <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'settings' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('settings'); setSettingsOpen(true) }}>
             <span className="sidebar-icon" aria-hidden="true">⚙</span> Настройки
@@ -439,16 +535,47 @@ export default function App() {
           <span className="sidebar-label">Текущий проект</span>
           <label className="sidebar-project-switcher"><span className="project-mini-icon">R</span><select aria-label="Выбрать проект" value={workspace.metadata.id} onChange={(event) => switchWorkspace(event.target.value)}>{workspaces.map((entry) => <option key={entry.metadata.id} value={entry.metadata.id}>{entry.metadata.name}</option>)}</select></label>
           <button type="button" className="sidebar-project-open" onClick={() => setView('workspace')}><strong>{workspace.metadata.name}</strong><small>{workspace.metadata.localPath ?? 'Локальный workspace'}</small></button>
-          <label className="sidebar-branch"><span>Ветка</span><select value={workspace.metadata.activeBranch} onChange={(event) => changeBranch(event.target.value)}><option>main</option><option>develop</option><option>feature/rbuilder</option></select></label>
-          <button type="button" className="sidebar-preview-status" onClick={() => { setView('workspace'); setDockTab('files') }}><span className="status-dot status-dot--ready" /> Живой просмотр <span>→</span></button>
-          <div className="sidebar-preview-url"><span className="status-dot status-dot--ready" /> https://localhost:5174</div>
-          <div className="sidebar-build"><span>Сборка</span><strong><i /> {state.checks ? 'Успешно' : 'Готово'}</strong></div>
-          <div className="sidebar-build-meta"><span>Последний коммит</span><span>сейчас</span></div>
+          <div className="sidebar-branch">
+            <span>Ветка</span>
+            <button
+              type="button"
+              className="sidebar-branch-value"
+              title="Открыть панель Git в рабочей области"
+              onClick={() => { setView('workspace'); setDockTab('git') }}
+            >
+              {git?.isRepo ? (git.branch ?? 'main') : `${workspace.metadata.activeBranch} · нет репозитория`}
+            </button>
+          </div>
+          <button type="button" className="sidebar-preview-status" onClick={() => { setView('workspace'); setDockTab('files') }}>
+            <span className={state.checks && state.checks.findings.length === 0 ? 'status-dot status-dot--ready' : 'status-dot'} />
+            {state.checks ? summarizeChecks(state.checks) : 'Живой просмотр'} <span>→</span>
+          </button>
+          <div className="sidebar-preview-url">
+            <span className="status-dot status-dot--ready" /> <span title={serverLabel()}>{serverLabel()}</span>
+          </div>
+          <div className="sidebar-build">
+            <span>Файлов в проекте</span><strong><i /> {state.project.files.length}</strong>
+          </div>
+          <div className="sidebar-build-meta">
+            <span>Изменений в git</span>
+            <span>{git?.isRepo ? `${git.changes}` : '—'}</span>
+          </div>
+          {git?.lastCommit ? (
+            <div className="sidebar-build-meta"><span>Коммит</span><span title={git.lastCommit}>{git.lastCommit}</span></div>
+          ) : null}
         </section>
 
         <div className="sidebar-bottom">
           <button type="button" className="sidebar-link sidebar-link--button" onClick={() => setBrowserSessionOpen(true)}><span className="sidebar-icon" aria-hidden="true">◉</span> Сессии браузера</button>
-          <div className="sidebar-credits"><span>Кредиты ИИ</span><strong>Локально</strong><div className="credits-track"><i /></div></div>
+          <button type="button" className="sidebar-link sidebar-link--button" onClick={() => setSettingsOpen(true)}>
+            <span className="sidebar-icon" aria-hidden="true">{activeProvider.kind === 'ollama' || activeProvider.kind === 'lmstudio' ? '⌂' : '☁'}</span>
+            {state.configured ? activeProvider.name : 'Провайдер не настроен'}
+          </button>
+          <div className="sidebar-credits">
+            <span>{isDesktop() ? 'Приложение' : 'Режим'}</span>
+            <strong>{isDesktop() ? 'Desktop' : 'Web'}</strong>
+            <div className="credits-track"><i /></div>
+          </div>
         </div>
       </aside>
       {sidebarCollapsed ? <button type="button" className="sidebar-reopen" onClick={() => setSidebarCollapsed(false)} aria-label="Показать боковую панель" title="Показать боковую панель">→</button> : null}
@@ -456,13 +583,63 @@ export default function App() {
       <main className="main-shell" id="workspace">
         {view === 'home' ? (
           <DesktopHome
-            project={workspace.project}
+            project={state.project}
+            workspace={workspace}
+            workspaces={workspaces}
             configured={state.configured}
             model={state.model ?? null}
+            provider={activeProvider}
+            mode={state.mode}
+            checks={state.checks}
             onOpenWorkspace={() => setView('workspace')}
+            onOpenWorkspaceById={switchWorkspace}
+            onOpenProjects={() => { setActiveNav('projects'); setView('projects') }}
+            onOpenAgents={() => { setActiveNav('agents'); setView('agents') }}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onImportFolder={() => void openLocalFolder()}
+            importing={importing}
             onNewProject={reset}
           />
-        ) : (
+        ) : null}
+
+        {view === 'projects' ? (
+          <ProjectsView
+            workspaces={workspaces.length > 0 ? workspaces : [workspace]}
+            activeId={workspace.metadata.id}
+            onOpen={switchWorkspace}
+            onRename={renameWorkspace}
+            onDelete={deleteWorkspace}
+            onCreate={reset}
+            onImportFolder={() => void openLocalFolder()}
+            importing={importing}
+          />
+        ) : null}
+
+        {view === 'agents' ? (
+          <AgentsView
+            provider={activeProvider}
+            configured={state.configured}
+            model={state.model ?? null}
+            mode={state.mode}
+            onModeChange={setMode}
+            onOpenWorkspace={() => setView('workspace')}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenBrowserSessions={() => setBrowserSessionOpen(true)}
+          />
+        ) : null}
+
+        {view === 'publish' ? (
+          <PublishView
+            project={state.project}
+            document={previewDocument}
+            checks={state.checks}
+            runningChecks={runningChecks}
+            onRunChecks={() => void runProjectChecks()}
+            onOpenWorkspace={() => { setView('workspace'); setDockTab('checks') }}
+          />
+        ) : null}
+
+        {view === 'workspace' ? (
           <>
             <header className="topbar">
               <div className="breadcrumb">
@@ -472,7 +649,7 @@ export default function App() {
               </div>
 
               <div className="topbar-end">
-                <span className="topbar-mode">Web builder</span>
+                <span className="topbar-mode">{state.mode === 'plan' ? 'План' : 'Сборка'}</span>
                 {state.configured && state.model ? <span className="topbar-model">{state.model}</span> : null}
               </div>
             </header>
@@ -519,7 +696,7 @@ export default function App() {
               </div>
             </div>
           </>
-        )}
+        ) : null}
       </main>
       {browserSessionOpen ? <BrowserSessionPanel onClose={() => setBrowserSessionOpen(false)} /> : null}
       {settingsOpen ? (
@@ -533,17 +710,6 @@ export default function App() {
       ) : null}
     </div>
   )
-}
-
-function loadSavedWorkspaces(): Workspace[] {
-  try {
-    const raw = localStorage.getItem('rbuilder-workspaces:v1')
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as Workspace[]
-    return Array.isArray(parsed) ? parsed.filter((entry) => entry?.metadata?.id && entry.project?.files) : []
-  } catch {
-    return []
-  }
 }
 
 function loadProviderProfiles(): ProviderProfile[] {

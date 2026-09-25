@@ -184,8 +184,11 @@ function escapeScriptBody(script: string): string {
   return script.replace(/<\/script/gi, '<\\/script')
 }
 
-/** Code the host injects into the preview: the runtime and its channel id. */
-export type PreviewInjection = { channel: string; script: string }
+/**
+ * Code the host injects into the preview: the runtime, its channel id, and where
+ * the local API answers (only the desktop build needs the last one).
+ */
+export type PreviewInjection = { channel: string; script: string; apiBase?: string }
 
 /**
  * Builds the document rendered by the preview iframe. Stylesheets and scripts
@@ -229,8 +232,11 @@ export function buildPreviewDocument(project: Project, injection?: PreviewInject
 
 /** Puts the runtime at the top of the document so nothing escapes it. */
 function injectRuntime(html: string, injection: PreviewInjection): string {
+  const apiBase = injection.apiBase
+    ? `<script>window.__freebuffApiBase=${JSON.stringify(injection.apiBase)};</script>\n`
+    : ''
   const snippet = `<script>window.__freebuffChannel=${JSON.stringify(injection.channel)};</script>
-<script>${injection.script}</script>`
+${apiBase}<script>${injection.script}</script>`
 
   const head = /<head[^>]*>/i.exec(html)
   if (head) {

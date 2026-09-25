@@ -8,3 +8,6 @@ dist
 
 # Scratch copy of the generated project used by the terminal
 .freebuff-workspace
+
+# The bundled production server
+/dist-server

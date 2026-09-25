@@ -1,5 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { summarizeChecks, type ChecksResult } from '../lib/checks'
+import {
+  changeLabel,
+  gitCommitCommand,
+  gitTone,
+  GIT_INIT_COMMAND,
+  notifyGitChanged,
+  readGitState,
+  runGit,
+  type GitState,
+} from '../lib/git'
 import type { PreviewEvent, PreviewInspector } from '../lib/inspector'
 import type { Project, ProjectFile } from '../lib/project'
 import type { TerminalLine } from '../lib/store'
@@ -174,12 +184,136 @@ function changedFiles(project: Project, baseline: Project): { path: string; stat
   })
 }
 
+/**
+ * The Git tab runs real `git` in the terminal workspace, so what it reports can
+ * be verified outside the app. It also lists how the project differs from the
+ * state it was imported in, which is useful before the repository exists.
+ */
 function GitPanel({ project, baselineProject }: DockProps) {
-  const changes = useMemo(() => changedFiles(project, baselineProject), [project, baselineProject])
-  return <div className="git-panel">
-    <div className="panel-actions"><span className="panel-status">{changes.length ? `${changes.length} изменённых файлов` : 'Рабочее дерево чистое'}</span><button type="button" className="button button--quiet" disabled={!changes.length}>Создать контрольную точку</button></div>
-    {changes.length ? <ul className="git-list">{changes.map((change) => <li key={change.path} className="git-item"><span className={`git-status git-status--${change.status}`}>{change.status}</span><span>{change.path}</span></li>)}</ul> : <p className="dock-note">Измените файл или попросите агента внести правки. Изменения появятся здесь до создания контрольной точки.</p>}
-  </div>
+  const [state, setState] = useState<GitState | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [note, setNote] = useState<string | null>(null)
+
+  const files = useMemo(
+    () => project.files.map((file) => ({ path: file.path, content: file.content })),
+    [project.files],
+  )
+  const reference = useMemo(() => changedFiles(project, baselineProject), [project, baselineProject])
+
+  const refresh = useCallback(async () => {
+    setBusy(true)
+    const next = await readGitState(files)
+    setState(next)
+    setBusy(false)
+    notifyGitChanged()
+  }, [files])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const run = useCallback(
+    async (command: string, successNote: string) => {
+      setBusy(true)
+      setNote(null)
+      const result = await runGit(command, files)
+      setNote(result.ok ? successNote : result.error ?? 'Не удалось выполнить git-команду.')
+      const next = await readGitState(files)
+      setState(next)
+      setBusy(false)
+      notifyGitChanged()
+    },
+    [files],
+  )
+
+  const tone = gitTone(state)
+  const branch = state?.branch ?? null
+  const changeCount = state?.changes.length ?? 0
+
+  return (
+    <div className="git-panel">
+      <div className="panel-actions">
+        <span className="panel-status">
+          {tone === 'missing'
+            ? 'Рабочая папка терминала ещё не под git'
+            : tone === 'clean'
+              ? `Ветка ${branch ?? 'main'} · рабочее дерево чистое`
+              : `Ветка ${branch ?? 'main'} · ${changeCount} изменений`}
+        </span>
+        <button type="button" className="button button--quiet" onClick={() => void refresh()} disabled={busy}>
+          {busy ? 'Обновление…' : 'Обновить'}
+        </button>
+        {tone === 'missing' ? (
+          <button
+            type="button"
+            className="button"
+            disabled={busy}
+            onClick={() => void run(GIT_INIT_COMMAND, 'Репозиторий создан.')}
+          >
+            Создать репозиторий
+          </button>
+        ) : (
+          <>
+            <input
+              className="input git-message"
+              value={message}
+              placeholder="Сообщение коммита"
+              onChange={(event) => setMessage(event.target.value)}
+            />
+            <button
+              type="button"
+              className="button"
+              disabled={busy || changeCount === 0 || !message.trim()}
+              onClick={() => void run(gitCommitCommand(message.trim()), 'Изменения зафиксированы.')}
+            >
+              Зафиксировать
+            </button>
+          </>
+        )}
+      </div>
+
+      {note ? <p className="dock-note">{note}</p> : null}
+
+      {state?.isRepo && state.lastCommit ? (
+        <p className="dock-note">Последний коммит: <code>{state.lastCommit}</code></p>
+      ) : null}
+
+      {state?.error ? <p className="dock-note dock-note--error">{state.error}</p> : null}
+
+      {tone === 'missing' ? (
+        <p className="dock-note">
+          Терминал работает в копии проекта (<code>.freebuff-workspace/project</code>). Создайте
+          репозиторий, чтобы фиксировать контрольные точки этой копии — приложение при этом не трогает
+          ваш собственный git-репозиторий.
+        </p>
+      ) : null}
+
+      {changeCount > 0 ? (
+        <ul className="git-list">
+          {state?.changes.map((change) => (
+            <li key={`${change.path}-${change.index}${change.worktree}`} className="git-item">
+              <span className={`git-status git-status--${changeLabel(change)}`}>{changeLabel(change)}</span>
+              <span>{change.path}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {changeCount === 0 && tone !== 'missing' ? (
+        <p className="dock-note">Все изменения зафиксированы. Правки агента или редактора появятся здесь.</p>
+      ) : null}
+
+      {reference.length > 0 ? (
+        <>
+          <p className="dock-note">
+            Отличий от исходного состояния проекта: {reference.length}
+            {reference.length ? ` (${reference.map((entry) => entry.path).slice(0, 4).join(', ')}${reference.length > 4 ? '…' : ''})` : ''}
+          </p>
+        </>
+      ) : null}
+    </div>
+  )
 }
 
 /* ------------------------------------------------------------------ */

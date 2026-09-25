@@ -21,7 +21,17 @@ type Booted = {
   posted: Posted[]
 }
 
-function boot(body = '<h1>Timer</h1><button id="start">Start</button><input id="label" placeholder="Name" />'): Booted {
+type BootOptions = {
+  /** Where the desktop shell serves the API; unset in the browser. */
+  apiBase?: string
+  /** Replaces window.fetch before the runtime wraps it. */
+  fetchImpl?: (input: unknown) => Promise<unknown>
+}
+
+function boot(
+  body = '<h1>Timer</h1><button id="start">Start</button><input id="label" placeholder="Name" />',
+  options: BootOptions = {},
+): Booted {
   const dom = new JSDOM(`<!doctype html><html><body>${body}</body></html>`, {
     runScripts: 'outside-only',
   })
@@ -34,7 +44,10 @@ function boot(body = '<h1>Timer</h1><button id="start">Start</button><input id="
   const posted: Posted[] = []
   window.addEventListener('message', (event) => posted.push((event as MessageEvent).data))
 
-  ;(window as unknown as Record<string, unknown>).__freebuffChannel = CHANNEL
+  const scope = window as unknown as Record<string, unknown>
+  scope['__freebuffChannel'] = CHANNEL
+  if (options.apiBase) scope['__freebuffApiBase'] = options.apiBase
+  if (options.fetchImpl) scope['fetch'] = options.fetchImpl
   window.eval(RUNTIME_SCRIPT)
 
   return { window, posted }
@@ -70,6 +83,39 @@ function ask(booted: Booted, action: string, payload: Record<string, unknown> = 
     )
   })
 }
+
+describe('preview runtime network', () => {
+  it('keeps /api calls on the page origin in the browser', async () => {
+    const seen: string[] = []
+    const booted = boot('<h1>x</h1>', {
+      fetchImpl: async (input) => {
+        seen.push(String(input))
+        return { ok: true, status: 200 }
+      },
+    })
+
+    await (booted.window as unknown as { fetch: (input: string) => Promise<unknown> }).fetch('/api/proxy')
+    expect(seen).toEqual(['/api/proxy'])
+  })
+
+  it('sends /api calls to the injected local server in the desktop build', async () => {
+    const seen: string[] = []
+    const booted = boot('<h1>x</h1>', {
+      apiBase: 'http://127.0.0.1:5185/',
+      fetchImpl: async (input) => {
+        seen.push(String(input))
+        return { ok: true, status: 200 }
+      },
+    })
+
+    const call = (input: string): Promise<unknown> =>
+      (booted.window as unknown as { fetch: (value: string) => Promise<unknown> }).fetch(input)
+
+    await call('/api/proxy')
+    await call('/assets/app.js')
+    expect(seen).toEqual(['http://127.0.0.1:5185/api/proxy', '/assets/app.js'])
+  })
+})
 
 describe('preview runtime', () => {
   it('announces itself with a ready message', async () => {

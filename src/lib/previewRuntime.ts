@@ -30,6 +30,39 @@ function previewRuntime(): void {
   const scope = window as unknown as Record<string, any>
   const channel = typeof scope['__freebuffChannel'] === 'string' ? scope['__freebuffChannel'] : 'preview'
 
+  // The desktop build serves this document from a custom scheme and runs the API
+  // as a separate local process, so `/api/proxy` is not on this origin. Empty in
+  // the browser, where relative URLs already point at the right server.
+  const apiBase =
+    typeof scope['__freebuffApiBase'] === 'string'
+      ? String(scope['__freebuffApiBase']).replace(/\/+$/, '')
+      : ''
+
+  function apiTarget(input: unknown): unknown {
+    if (!apiBase) return input
+    if (typeof input === 'string') return input.startsWith('/api/') ? apiBase + input : input
+
+    try {
+      const Request = scope['Request']
+      if (typeof Request === 'function' && input instanceof Request) {
+        const url = String((input as { url?: unknown }).url ?? '')
+        if (url.startsWith('/api/')) return new Request(apiBase + url, input)
+      }
+
+      const Url = scope['URL']
+      if (typeof Url === 'function' && input instanceof Url) {
+        const value = input as { pathname?: string; search?: string }
+        if (value.pathname && value.pathname.startsWith('/api/')) {
+          return new Url(apiBase + value.pathname + (value.search ?? ''))
+        }
+      }
+    } catch {
+      /* fall through and let the original call report the problem */
+    }
+
+    return input
+  }
+
   const events: Array<Record<string, unknown>> = []
   let sequence = 0
 
@@ -97,9 +130,10 @@ function previewRuntime(): void {
   if (typeof scope.fetch === 'function') {
     const originalFetch = scope.fetch
     scope.fetch = async function (input: unknown, init?: unknown) {
-      const url = typeof input === 'string' ? input : describe((input as { url?: string })?.url)
+      const target = apiTarget(input)
+      const url = typeof target === 'string' ? target : describe((target as { url?: string })?.url)
       try {
-        const response = await originalFetch.call(this, input, init)
+        const response = await originalFetch.call(this, target, init)
         if (!response.ok) {
           push({ kind: 'network', level: 'error', text: `${response.status} ${url}` })
         }
@@ -116,8 +150,9 @@ function previewRuntime(): void {
     const open = Original.prototype.open
     const send = Original.prototype.send
     Original.prototype.open = function (method: string, url: string, ...rest: unknown[]) {
-      this.__freebuffUrl = url
-      return open.call(this, method, url, ...rest)
+      const target = typeof url === 'string' && apiBase && url.startsWith('/api/') ? apiBase + url : url
+      this.__freebuffUrl = target
+      return open.call(this, method, target, ...rest)
     }
     Original.prototype.send = function (...args: unknown[]) {
       this.addEventListener('error', () => {

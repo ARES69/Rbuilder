@@ -1422,3 +1422,11 @@ input {
 .segment--active:hover {
   color: var(--accent-fg);
 }
+
+.git-status--R { color: #7c9ec4; }
+.git-status--C { color: #b58b4e; }
+.git-message { max-width: 220px; min-width: 120px; }
+
+/* The Git panel grows buttons, so its action row wraps instead of clipping. */
+.git-panel .panel-actions { flex-wrap: wrap; row-gap: 8px; }
+.git-panel .panel-status { flex: 1 1 140px; }
