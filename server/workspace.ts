@@ -1,7 +1,12 @@
 /**
  * The terminal. Commands run in a scratch copy of the project, never against the
  * app's own source: the virtual project is written to
- * `.freebuff-workspace/project/` and `bash -c <command>` runs there.
+ * `.freebuff-workspace/project/` and a shell runs the command there.
+ *
+ * The interpreter is `bash -c` when one is installed — that keeps the dev
+ * experience identical on macOS, Linux and Windows-with-Git-Bash — and falls back
+ * to the platform shell (cmd.exe, then PowerShell) otherwise, because the packaged
+ * application must have a working terminal on a machine without Git too.
  *
  * This is a local developer tool with the developer's own permissions, so the
  * guardrails are honest ones rather than a sandbox: privileged commands and a
@@ -20,6 +25,26 @@ export const COMMAND_TIMEOUT_MS = 20_000
 export const MAX_COMMAND_LENGTH = 400
 
 export type CommandFile = { path: string; content: string }
+
+export type ShellCommand = { file: string; args: string[] }
+
+/**
+ * Shells to try, in order. `RBUILDER_SHELL` overrides the first one so a
+ * developer can point the terminal at zsh, sh or a specific bash build.
+ */
+export function shellCandidates(command: string): ShellCommand[] {
+  const override = process.env.RBUILDER_SHELL?.trim()
+  const posix: ShellCommand = { file: override || 'bash', args: ['-c', command] }
+
+  if (process.platform !== 'win32') return [posix]
+
+  const comspec = process.env.ComSpec?.trim() || 'cmd.exe'
+  return [
+    posix,
+    { file: comspec, args: ['/d', '/s', '/c', command] },
+    { file: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-Command', command] },
+  ]
+}
 
 export type CommandEvent =
   | { type: 'stdout'; text: string }
@@ -86,60 +111,75 @@ export function runCommand(
   cwd: string,
   onEvent: (event: CommandEvent) => void,
 ): Promise<void> {
-  return new Promise((resolve) => {
-    let bytes = 0
-    let finished = false
-    let timedOut = false
+  const shells = shellCandidates(command)
+  let bytes = 0
 
-    const child = spawn('bash', ['-c', command], {
-      cwd,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-    })
+  const attempt = (index: number): Promise<void> =>
+    new Promise((resolve) => {
+      const shell = shells[index] ?? shells[shells.length - 1]!
+      let finished = false
+      let timedOut = false
 
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGKILL')
-    }, COMMAND_TIMEOUT_MS)
-
-    const emit = (event: CommandEvent) => {
-      if (finished) return
-      onEvent(event)
-    }
-
-    const forward = (type: 'stdout' | 'stderr') => (chunk: Buffer) => {
-      if (bytes > MAX_OUTPUT_BYTES) return
-      bytes += chunk.length
-      const text = chunk.toString('utf8')
-      if (bytes > MAX_OUTPUT_BYTES) {
-        emit({ type, text: `${text}\n… output truncated at ${MAX_OUTPUT_BYTES / 1024} KB` })
-        child.kill('SIGKILL')
-        return
-      }
-      emit({ type, text })
-    }
-
-    child.stdout.on('data', forward('stdout'))
-    child.stderr.on('data', forward('stderr'))
-
-    child.on('error', (error) => {
-      clearTimeout(timer)
-      finished = true
-      emit({
-        type: 'error',
-        message:
-          error.message.includes('ENOENT')
-            ? 'No shell available on this machine (bash was not found).'
-            : error.message,
+      const child = spawn(shell.file, shell.args, {
+        cwd,
+        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       })
-      emit({ type: 'exit', code: null, timedOut })
-      resolve()
+
+      const timer = setTimeout(() => {
+        timedOut = true
+        child.kill('SIGKILL')
+      }, COMMAND_TIMEOUT_MS)
+
+      const emit = (event: CommandEvent) => {
+        if (finished) return
+        onEvent(event)
+      }
+
+      const forward = (type: 'stdout' | 'stderr') => (chunk: Buffer) => {
+        if (bytes > MAX_OUTPUT_BYTES) return
+        bytes += chunk.length
+        const text = chunk.toString('utf8')
+        if (bytes > MAX_OUTPUT_BYTES) {
+          emit({ type, text: `${text}\n… output truncated at ${MAX_OUTPUT_BYTES / 1024} KB` })
+          child.kill('SIGKILL')
+          return
+        }
+        emit({ type, text })
+      }
+
+      child.stdout.on('data', forward('stdout'))
+      child.stderr.on('data', forward('stderr'))
+
+      child.on('error', (error) => {
+        clearTimeout(timer)
+
+        // A missing interpreter is not a failed command: try the next shell.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' && index < shells.length - 1) {
+          finished = true
+          resolve(attempt(index + 1))
+          return
+        }
+
+        // The closing event must not be swallowed by the guard, so it is handed
+        // over before the command is considered finished.
+        emit({
+          type: 'error',
+          message: (error as NodeJS.ErrnoException).code === 'ENOENT'
+            ? 'No shell available on this machine (bash, cmd and PowerShell were all missing).'
+            : error.message,
+        })
+        emit({ type: 'exit', code: null, timedOut })
+        finished = true
+        resolve()
+      })
+
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        emit({ type: 'exit', code, timedOut })
+        finished = true
+        resolve()
+      })
     })
 
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      finished = true
-      emit({ type: 'exit', code, timedOut })
-      resolve()
-    })
-  })
+  return attempt(0)
 }

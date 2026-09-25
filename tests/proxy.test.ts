@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { systemPromptFor, tokenTotal } from '../server/chat-proxy'
+import { systemPromptFor, tokenTotal } from '../server/api'
 import { WRAP_UP_PROMPT } from '../src/lib/budget'
 
 describe('token usage from a provider', () => {

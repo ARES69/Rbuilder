@@ -4,7 +4,7 @@
  *
  * The preview runs on a sandboxed opaque origin, so a page cannot read a
  * cross-origin response: every third-party call would die on CORS. This route
- * performs the request from the dev server instead and answers with permissive
+ * performs the request from the local server instead and answers with permissive
  * CORS headers, which turns "call any API" into a plain same-origin call for
  * the generated app.
  *
@@ -22,6 +22,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { lookup } from 'node:dns/promises'
 import type { Plugin } from 'vite'
 import { z } from 'zod'
+import { readBody, sendJson } from './http'
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 20_000
@@ -181,7 +182,7 @@ export function parseProxyRequest(raw: unknown): ProxyRequest {
 }
 
 export function apiProxy(env: Record<string, string | undefined>): Plugin {
-  const allowPrivate = /^(1|true|yes)$/i.test(env.PROXY_ALLOW_PRIVATE?.trim() ?? '')
+  const allowPrivate = allowPrivateFor(env)
 
   return {
     name: 'freebuff-api-proxy',
@@ -217,7 +218,7 @@ export async function handleProxy(
 
   let raw: unknown
   try {
-    const body = await readBody(req)
+    const body = await readBody(req, MAX_BODY_BYTES)
     raw = JSON.parse(body || '{}')
   } catch (error) {
     const message = error instanceof Error && error.message.includes('too large')
@@ -278,6 +279,11 @@ export async function handleProxy(
   res.end(payload)
 }
 
+/** `PROXY_ALLOW_PRIVATE=1` opts a developer into reaching their own machine. */
+export function allowPrivateFor(env: Record<string, string | undefined>): boolean {
+  return /^(1|true|yes)$/i.test(env.PROXY_ALLOW_PRIVATE?.trim() ?? '')
+}
+
 /**
  * Resolves the hostname and refuses anything that points into a private
  * network. This also closes the DNS-rebinding hole where a public-looking name
@@ -312,29 +318,4 @@ function applyCors(res: ServerResponse, req: IncomingMessage): void {
     'Access-Control-Allow-Methods',
     typeof requestedMethod === 'string' && requestedMethod ? requestedMethod : 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
   )
-}
-
-function sendJson(res: ServerResponse, status: number, payload: unknown): void {
-  res.statusCode = status
-  res.setHeader('Content-Type', 'application/json; charset=utf-8')
-  res.end(JSON.stringify(payload))
-}
-
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let size = 0
-    const chunks: Buffer[] = []
-
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.byteLength
-      if (size > MAX_BODY_BYTES) {
-        req.destroy()
-        reject(new Error('The request body is too large.'))
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
-  })
 }
