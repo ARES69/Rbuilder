@@ -60,8 +60,20 @@ fn find_server_exe() -> Option<PathBuf> {
     dev.exists().then_some(dev)
 }
 
-/// Where generated projects live. `RBUILDER_WORKSPACE_ROOT` wins, then the
-/// checkout's `.freebuff-workspace` (dev), then `%LOCALAPPDATA%\RBUILDER\workspace`.
+/// True when the shell runs from a cargo `target` directory, i.e. a developer
+/// running it from the checkout rather than an installed copy.
+fn is_dev_run() -> bool {
+    std::env::current_exe()
+        .map(|exe| {
+            exe.components()
+                .any(|c| c.as_os_str() == "target")
+        })
+        .unwrap_or(false)
+}
+
+/// Where generated projects live. `RBUILDER_WORKSPACE_ROOT` wins. Installed
+/// builds use `%LOCALAPPDATA%\RBUILDER\workspace`; only a dev run from the
+/// checkout keeps using its `.freebuff-workspace`.
 fn resolve_workspace_root() -> Result<PathBuf, String> {
     if let Ok(from_env) = std::env::var("RBUILDER_WORKSPACE_ROOT") {
         if !from_env.trim().is_empty() {
@@ -69,9 +81,10 @@ fn resolve_workspace_root() -> Result<PathBuf, String> {
         }
     }
 
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dev = manifest.join("..").join(".freebuff-workspace");
-    let root = if dev.is_dir() {
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(".freebuff-workspace");
+    let root = if is_dev_run() && dev.is_dir() {
         dev
     } else {
         let base = std::env::var("LOCALAPPDATA")
@@ -129,6 +142,7 @@ pub fn spawn_server(port: u16) -> Result<SidecarGuard, String> {
     }
 
     if let Some(stdout) = child.stdout.take() {
+        let log_path = log_path.clone();
         thread::spawn(move || {
             use std::io::{BufRead, BufReader, Write};
             let reader = BufReader::new(stdout);
