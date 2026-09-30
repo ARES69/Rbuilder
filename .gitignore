@@ -11,3 +11,10 @@ dist
 
 # The bundled production server
 /dist-server
+
+# Rust/Tauri build artifacts
+/src-tauri/target
+/src-tauri/gen/schemas
+
+# Compiled sidecar
+/.freebuff-build
