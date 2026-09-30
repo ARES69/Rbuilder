@@ -1,26 +1,40 @@
 /* ------------------------------------------------------------------
-   Freebuff Web — Minimalism theme
-   Near-monochrome palette, hairline dividers, restrained spacing scale,
-   one accent (near-black) reserved for the primary action.
+   RBUILDER shell — zcode-style theme
+   Deep neutral dark by default, warm off-white light variant, one
+   blue accent. Everything downstream reads these variables only.
    ------------------------------------------------------------------ */
 
-:root {
-  color-scheme: light dark;
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
 
-  --bg: #ffffff;
-  --bg-subtle: #fafafa;
-  --bg-inset: #f4f4f4;
-  --bg-hover: #f0f0f0;
+  /* ZCode dark: neutral-900 canvas, neutral-800 surfaces, sky accent. */
+  --bg: #171717;
+  --bg-subtle: #1c1c1c;
+  --bg-inset: #232323;
+  --bg-hover: #262626;
+  --bg-raised: #2a2a2a;
+  --bg-rail: #1a1a1a;
+  --bg-input: #202020;
 
-  --fg: #101010;
-  --fg-muted: #666666;
-  --fg-faint: #9b9b9b;
+  --fg: #ececec;
+  --fg-muted: #a3a3a3;
+  --fg-faint: #737373;
 
-  --line: #e9e9e9;
-  --line-strong: #d8d8d8;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.13);
 
-  --accent: #101010;
+  --accent: #0ea5e9;
+  --accent-hover: #38bdf8;
+  --accent-soft: rgba(14, 165, 233, 0.16);
   --accent-fg: #ffffff;
+
+  --ok: #16a34a;
+  --warn: #d97706;
+  --err: #dc2626;
+
+  --add: #22c55e;
+  --del: #ef4444;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -30,34 +44,49 @@
   --space-6: 32px;
   --space-7: 48px;
 
-  --radius-sm: 4px;
-  --radius: 7px;
+  --radius-sm: 6px;
+  --radius: 9px;
+  --radius-lg: 13px;
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-    monospace;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", monospace;
 
-  --pane-header-height: 52px;
+  --pane-header-height: 46px;
+  --rail-width: 232px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d0d0d;
-    --bg-subtle: #141414;
-    --bg-inset: #191919;
-    --bg-hover: #202020;
+:root[data-theme='light'] {
+  color-scheme: light;
 
-    --fg: #f2f2f2;
-    --fg-muted: #a0a0a0;
-    --fg-faint: #6e6e6e;
+  /* ZCode light: neutral-50 canvas, neutral-100 rails, 10% ink borders. */
+  --bg: #fafafa;
+  --bg-subtle: #f5f5f5;
+  --bg-inset: #f5f5f5;
+  --bg-hover: #e5e5e5;
+  --bg-raised: #ffffff;
+  --bg-rail: #f5f5f5;
+  --bg-input: #ffffff;
 
-    --line: #242424;
-    --line-strong: #333333;
+  --fg: #404040;
+  --fg-muted: #737373;
+  --fg-faint: #a3a3a3;
 
-    --accent: #f2f2f2;
-    --accent-fg: #101010;
-  }
+  --line: rgba(0, 0, 0, 0.09);
+  --line-strong: rgba(0, 0, 0, 0.16);
+
+  --accent: #0284c7;
+  --accent-hover: #0ea5e9;
+  --accent-soft: rgba(2, 132, 199, 0.1);
+  --accent-fg: #ffffff;
+
+  --ok: #16a34a;
+  --warn: #b45309;
+  --err: #dc2626;
+
+  --add: #16a34a;
+  --del: #dc2626;
 }
 
 *,
@@ -85,14 +114,15 @@ body {
 
 button,
 textarea,
-input {
+input,
+select {
   font: inherit;
   color: inherit;
 }
 
 :focus-visible {
-  outline: 1px solid var(--fg);
-  outline-offset: 2px;
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .sr-only {
@@ -113,9 +143,10 @@ input {
 
 .app {
   display: flex;
-  flex-direction: column;
   height: 100%;
   min-height: 0;
+  background: var(--bg);
+  color: var(--fg);
 }
 
 .topbar {
@@ -252,24 +283,23 @@ input {
   justify-content: space-between;
   gap: var(--space-4);
   height: var(--pane-header-height);
-  padding: 0 var(--space-5);
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--line);
   flex: none;
   min-width: 0;
   overflow: hidden;
+  background: var(--bg);
 }
 
 .pane-title {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--fg-muted);
+  color: var(--fg);
 }
 
 .pane-subtitle {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--fg-faint);
 }
 
@@ -303,11 +333,11 @@ input {
   white-space: nowrap;
   flex: none;
   cursor: pointer;
-  transition: opacity 120ms ease, background-color 120ms ease, border-color 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
 }
 
 .button:hover:not(:disabled) {
-  opacity: 0.86;
+  background: var(--accent-hover);
 }
 
 .button:disabled {
@@ -325,7 +355,6 @@ input {
 .button--quiet:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--fg);
-  opacity: 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -337,10 +366,10 @@ input {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--space-6) var(--space-5);
+  padding: var(--space-5) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: var(--space-5);
 }
 
 .transcript--empty {
@@ -358,9 +387,9 @@ input {
 
 .turn-meta {
   font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-weight: 600;
   color: var(--fg-faint);
+  letter-spacing: 0.02em;
 }
 
 .turn-text {
@@ -370,7 +399,7 @@ input {
 }
 
 .turn--user .turn-body {
-  border-left: 1px solid var(--line-strong);
+  border-left: 2px solid var(--line-strong);
   padding-left: var(--space-4);
 }
 
@@ -396,13 +425,12 @@ input {
 .turn-working {
   margin: 0;
   color: var(--fg-faint);
-  font-style: normal;
 }
 
 .turn-error {
   margin: 0;
   font-size: 12px;
-  color: var(--fg-muted);
+  color: var(--err);
 }
 
 .markdown > *:first-child {
@@ -421,7 +449,7 @@ input {
 .markdown h3,
 .markdown h4 {
   margin: var(--space-5) 0 var(--space-3);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.35;
 }
 
@@ -509,7 +537,7 @@ input {
 }
 
 .markdown a {
-  color: var(--fg);
+  color: var(--accent);
   text-underline-offset: 3px;
 }
 
@@ -533,10 +561,10 @@ input {
   max-width: 100%;
   min-width: 0;
   white-space: nowrap;
-  padding: 3px 8px;
+  padding: 3px 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--bg-subtle);
+  background: var(--bg-inset);
   font-size: 12px;
   color: var(--fg-muted);
 }
@@ -544,10 +572,9 @@ input {
 .chip--file {
   font-family: var(--font-mono);
   font-size: 11px;
-  background: var(--bg);
+  background: var(--bg-inset);
 }
 
-/* The preview toolbar keeps its files on a single line. */
 .chips--files {
   flex-wrap: nowrap;
   overflow: hidden;
@@ -595,13 +622,12 @@ input {
 }
 
 /* ------------------------------------------------------------------ */
-/* Composer                                                           */
+/* Composer — zcode style: floating rounded card                      */
 /* ------------------------------------------------------------------ */
 
 .composer {
   flex: none;
-  border-top: 1px solid var(--line);
-  padding: var(--space-4) var(--space-5) var(--space-5);
+  padding: var(--space-3) var(--space-4) var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -611,8 +637,8 @@ input {
   margin: 0;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--fg-muted);
-  border-left: 1px solid var(--line-strong);
+  color: var(--warn);
+  border-left: 2px solid var(--warn);
   padding-left: var(--space-3);
 }
 
@@ -634,17 +660,18 @@ input {
 
 .composer-box {
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--bg);
-  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg-input);
+  padding: var(--space-3) var(--space-3) var(--space-2);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   transition: border-color 120ms ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 .composer-box:focus-within {
-  border-color: var(--fg-faint);
+  border-color: var(--accent);
 }
 
 .composer-input {
@@ -653,10 +680,11 @@ input {
   outline: none;
   resize: none;
   background: none;
-  padding: 0;
-  font-size: 14px;
+  padding: 0 var(--space-1);
+  font-size: 13.5px;
   line-height: 1.6;
   max-height: 208px;
+  color: var(--fg);
 }
 
 .composer-input::placeholder {
@@ -667,18 +695,18 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .composer-actions-left {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .composer-hint {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--fg-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -698,24 +726,25 @@ input {
   display: block;
   flex: none;
   width: 56px;
-  height: 2px;
+  height: 3px;
   background: var(--line);
   overflow: hidden;
+  border-radius: 999px;
 }
 
 .budget-meter-fill {
   display: block;
-  height: 2px;
-  background: var(--fg);
+  height: 3px;
+  background: var(--accent);
   transition: width 240ms linear;
 }
 
 .budget--wrapping .budget-meter-fill {
-  background: var(--fg-faint);
+  background: var(--warn);
 }
 
 .budget-text {
-  font-size: 12px;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -725,14 +754,15 @@ input {
 .dropzone {
   position: absolute;
   inset: var(--space-3);
-  border: 1px dashed var(--line-strong);
+  border: 1px dashed var(--accent);
   border-radius: var(--radius);
-  background: var(--bg-subtle);
+  background: var(--accent-soft);
   display: grid;
   place-items: center;
   font-size: 13px;
-  color: var(--fg-muted);
+  color: var(--accent);
   pointer-events: none;
+  z-index: 3;
 }
 
 /* ------------------------------------------------------------------ */
@@ -754,8 +784,8 @@ input {
 
 .empty-state h2 {
   margin: 0 0 var(--space-4);
-  font-size: 20px;
-  font-weight: 500;
+  font-size: 19px;
+  font-weight: 600;
   line-height: 1.3;
   letter-spacing: -0.01em;
 }
@@ -801,7 +831,7 @@ input {
 .preview-frame {
   flex: 1;
   min-height: 0;
-  padding: var(--space-5);
+  padding: var(--space-4);
   display: flex;
 }
 
@@ -823,6 +853,7 @@ input {
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius);
   padding: var(--space-7);
+  color: var(--fg-muted);
 }
 
 .preview-empty .empty-lede {
@@ -836,22 +867,30 @@ input {
 /* ------------------------------------------------------------------ */
 
 .transcript,
-.markdown-code {
+.markdown-code,
+.code-tree,
+.file-list,
+.console-log,
+.terminal-log,
+.finding-list,
+.task-rail {
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
 
-.transcript::-webkit-scrollbar,
-.markdown-code::-webkit-scrollbar {
+::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
-.transcript::-webkit-scrollbar-thumb,
-.markdown-code::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   background: var(--line-strong);
   border: 3px solid var(--bg);
   border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* ------------------------------------------------------------------ */
@@ -904,7 +943,7 @@ input {
   justify-content: space-between;
   gap: var(--space-3);
   height: 40px;
-  padding: 0 var(--space-4) 0 var(--space-5);
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--line);
   flex: none;
 }
@@ -970,8 +1009,8 @@ input {
 }
 
 .dock-note--error {
-  color: var(--fg-muted);
-  border-left: 1px solid var(--line-strong);
+  color: var(--err);
+  border-left: 1px solid var(--err);
   margin: var(--space-3) var(--space-5);
   padding: var(--space-2) var(--space-3);
 }
@@ -985,7 +1024,7 @@ input {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4) 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
   flex: none;
 }
 
@@ -1001,8 +1040,8 @@ input {
 
 .problem-badge {
   font-size: 11px;
-  color: var(--fg);
-  border: 1px solid var(--line-strong);
+  color: var(--err);
+  border: 1px solid var(--err);
   border-radius: 999px;
   padding: 2px 8px;
   white-space: nowrap;
@@ -1012,12 +1051,17 @@ input {
 /* Git --- */
 
 .git-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.git-list { list-style: none; margin: 0; padding: var(--space-3) var(--space-5); overflow: auto; }
+.git-list { list-style: none; margin: 0; padding: var(--space-3) var(--space-4); overflow: auto; }
 .git-item { display: flex; align-items: center; gap: var(--space-3); padding: 7px 0; color: var(--fg-muted); font-family: var(--font-mono); font-size: 11.5px; }
 .git-status { width: 16px; font-weight: 600; text-align: center; }
-.git-status--A { color: #6e9658; }
-.git-status--M { color: #b58b4e; }
-.git-status--D { color: #a65e5e; }
+.git-status--A { color: var(--add); }
+.git-status--M { color: var(--warn); }
+.git-status--D { color: var(--del); }
+.git-status--R { color: var(--accent); }
+.git-status--C { color: var(--warn); }
+.git-message { max-width: 220px; min-width: 120px; }
+.git-panel .panel-actions { flex-wrap: wrap; row-gap: 8px; }
+.git-panel .panel-status { flex: 1 1 140px; }
 
 /* Files --- */
 
@@ -1044,7 +1088,7 @@ input {
   text-align: left;
   border: 0;
   background: none;
-  padding: 7px var(--space-5);
+  padding: 7px var(--space-4);
   font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--fg-muted);
@@ -1056,12 +1100,14 @@ input {
 
 .file-item:hover {
   color: var(--fg);
+  background: var(--bg-hover);
 }
 
 .file-item--active {
   color: var(--fg);
-  border-left: 2px solid var(--fg);
-  padding-left: calc(var(--space-5) - 2px);
+  background: var(--bg-hover);
+  border-left: 2px solid var(--accent);
+  padding-left: calc(var(--space-4) - 2px);
 }
 
 .file-editor {
@@ -1076,7 +1122,7 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4) var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4) var(--space-2);
   flex: none;
 }
 
@@ -1102,7 +1148,7 @@ input {
   padding: var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
+  background: var(--bg-inset);
   color: var(--fg);
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -1114,7 +1160,7 @@ input {
 }
 
 .file-editor-input:focus {
-  border-color: var(--fg-faint);
+  border-color: var(--accent);
 }
 
 /* Console and checks --- */
@@ -1134,7 +1180,7 @@ input {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-3) var(--space-5) var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-4);
   margin: 0;
   list-style: none;
 }
@@ -1168,15 +1214,12 @@ input {
 
 .log--error,
 .finding--error {
-  color: var(--fg);
-  border-left: 1px solid var(--line-strong);
-  padding-left: var(--space-3);
-  margin-left: 2px;
+  color: var(--err);
 }
 
 .log--network,
 .finding--warning {
-  color: var(--fg-muted);
+  color: var(--warn);
 }
 
 .log--result {
@@ -1187,7 +1230,7 @@ input {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4) var(--space-4) var(--space-5);
+  padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--line);
   flex: none;
 }
@@ -1236,7 +1279,7 @@ input {
 
 .term-line--stderr,
 .term-line--error {
-  color: var(--fg);
+  color: var(--err);
 }
 
 .term-line--exit {
@@ -1251,7 +1294,7 @@ input {
 .plan {
   flex: none;
   border-top: 1px solid var(--line);
-  padding: var(--space-4) var(--space-5) 0;
+  padding: var(--space-4) var(--space-4) 0;
 }
 
 .plan-head {
@@ -1263,7 +1306,7 @@ input {
 
 .plan-title {
   font-size: 11px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--fg-muted);
 }
@@ -1351,18 +1394,19 @@ input {
 }
 
 .tool--running .tool-dot {
-  background: var(--fg-faint);
-  border-color: var(--fg-faint);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .tool--done .tool-dot {
-  background: var(--fg);
-  border-color: var(--fg);
+  background: var(--ok);
+  border-color: --ok;
+  border-color: var(--ok);
 }
 
 .tool--failed .tool-dot {
   background: var(--bg);
-  border-color: var(--fg);
+  border-color: var(--err);
 }
 
 .tool-label {
@@ -1415,18 +1459,10 @@ input {
 }
 
 .segment--active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .segment--active:hover {
-  color: var(--accent-fg);
+  color: var(--accent);
 }
-
-.git-status--R { color: #7c9ec4; }
-.git-status--C { color: #b58b4e; }
-.git-message { max-width: 220px; min-width: 120px; }
-
-/* The Git panel grows buttons, so its action row wraps instead of clipping. */
-.git-panel .panel-actions { flex-wrap: wrap; row-gap: 8px; }
-.git-panel .panel-status { flex: 1 1 140px; }

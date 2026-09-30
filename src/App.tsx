@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { AgentsView } from './components/AgentsView'
+import { InspectorPanel, type InspectorTab } from './components/InspectorPanel'
 import { ChatPanel } from './components/ChatPanel'
-import { CodeWorkbench } from './components/CodeWorkbench'
-import { DesktopHome } from './components/DesktopHome'
-import { ProjectsView } from './components/ProjectsView'
-import { PublishView } from './components/PublishView'
 import { SettingsPanel } from './components/SettingsPanel'
 import { BrowserSessionPanel } from './components/BrowserSessionPanel'
-import { PreviewPane, type DockTab } from './components/PreviewPane'
+import { TaskRail } from './components/TaskRail'
+import type { DockTab } from './components/PreviewPane'
 import { DEFAULT_PROVIDER_PROFILES, execCommand, fetchAgentConfig, type ProviderProfile } from './lib/agent'
-import { apiBase, isDesktop, serverLabel } from './lib/apiBase'
+import { apiBase, isDesktop } from './lib/apiBase'
 import { pickProjectFolder, type ImportedFolder } from './lib/desktop'
 import { GIT_CHANGED_EVENT, readGitState } from './lib/git'
 import { attachmentsToContext, type AttachmentMeta } from './lib/attachments'
 import type { Budget } from './lib/budget'
-import { runChecks, summarizeChecks, type ChecksResult } from './lib/checks'
+import { runChecks, type ChecksResult } from './lib/checks'
 import { channelFor, PreviewInspector } from './lib/inspector'
 import {
   buildPreviewDocument,
@@ -37,6 +34,7 @@ import {
 import { describeCall, executeTool, type ToolOutcome } from './lib/tools'
 import { runAgentTurn } from './lib/turn'
 import type { AgentMode, ChatTurn } from './lib/protocol'
+import { applyTheme, loadTheme, type Theme } from './lib/theme'
 import {
   createInitialState,
   loadState,
@@ -46,8 +44,8 @@ import {
   type ChatMessage,
 } from './lib/store'
 
-type View = 'home' | 'workspace' | 'projects' | 'agents' | 'publish'
-type NavId = 'home' | 'projects' | 'agents' | 'publish' | 'settings'
+type View = 'workspace' | 'projects'
+type NavId = 'workspace' | 'projects' | 'settings'
 
 /** What the sidebar reports about the terminal workspace, straight from git. */
 type GitSummary = { isRepo: boolean; branch: string | null; changes: number; lastCommit: string | null }
@@ -58,14 +56,15 @@ export default function App() {
   /** Live for the duration of one turn: how much time and token budget is left. */
   const [budget, setBudget] = useState<{ budget: Budget; wrappingUp: boolean } | null>(null)
   const [dockTab, setDockTab] = useState<DockTab>('files')
+  const [theme, setTheme] = useState<Theme>(loadTheme)
   const [runningChecks, setRunningChecks] = useState(false)
-  const [view, setView] = useState<View>('home')
-  const [activeNav, setActiveNav] = useState<NavId>('home')
+  const [, setView] = useState<View>('workspace')
+  const [, setActiveNav] = useState<NavId>('workspace')
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('inspector')
   const [importing, setImporting] = useState(false)
   const [git, setGit] = useState<GitSummary | null>(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [browserSessionOpen, setBrowserSessionOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [providers, setProviders] = useState<ProviderProfile[]>(loadProviderProfiles)
   const [activeProviderId, setActiveProviderId] = useState(() => loadActiveProviderId())
   // Saved provider lists from older builds may miss entries the current presets
@@ -132,6 +131,8 @@ export default function App() {
       /* provider settings are a convenience; keep them in memory if storage is unavailable */
     }
   }, [activeProviderId, providers])
+
+  useEffect(() => applyTheme(theme), [theme])
 
   useEffect(() => inspector.connect(), [inspector])
 
@@ -325,34 +326,6 @@ export default function App() {
     setView('workspace')
   }, [workspaces, workspace.metadata.id])
 
-  const renameWorkspace = useCallback((id: string, name: string) => {
-    setWorkspaces((entries) => {
-      const saved = entries.map((entry) =>
-        entry.metadata.id === id
-          ? { ...entry, metadata: { ...entry.metadata, name, updatedAt: Date.now() } }
-          : entry,
-      )
-      saveStoredWorkspaces(window.localStorage, saved)
-      return saved
-    })
-    setWorkspace((current) =>
-      current.metadata.id === id
-        ? { ...current, metadata: { ...current.metadata, name, updatedAt: Date.now() } }
-        : current,
-    )
-  }, [])
-
-  const deleteWorkspace = useCallback(
-    (id: string) => {
-      const remaining = workspaces.filter((entry) => entry.metadata.id !== id)
-      if (remaining.length === 0) return
-      saveStoredWorkspaces(window.localStorage, remaining)
-      setWorkspaces(remaining)
-      if (workspace.metadata.id === id) switchWorkspace(remaining[0]!.metadata.id)
-    },
-    [switchWorkspace, workspace.metadata.id, workspaces],
-  )
-
   const reset = useCallback(() => {
     if (busyRef.current) return
     if (!window.confirm('Start a new project? The chat and the generated files will be cleared.')) {
@@ -511,210 +484,74 @@ export default function App() {
   }, [send, setMode])
 
   return (
-    <div className="app">
-      <aside className={`sidebar${sidebarCollapsed ? ' sidebar--collapsed' : ''}`} aria-label="RBUILDER navigation">
-        <div className="sidebar-brand">
-          <span className="brand-mark" aria-hidden="true">R</span>
-          <span className="brand-name">RBUILDER</span>
-          <button type="button" className="sidebar-toggle" onClick={() => setSidebarCollapsed((value) => !value)} aria-label={sidebarCollapsed ? 'Показать боковую панель' : 'Скрыть боковую панель'} title={sidebarCollapsed ? 'Показать панель' : 'Скрыть панель'}>{sidebarCollapsed ? '→' : '←'}</button>
-        </div>          <button type="button" className="new-project" onClick={reset} disabled={busy}>
-          <span aria-hidden="true">＋</span>
-          Новый проект
-          <span className="new-project-shortcut">⌘ N</span>
-        </button>
+    <div className="app app--zcode">
+      <TaskRail
+        workspaces={workspaces.length > 0 ? workspaces : [workspace]}
+        activeId={workspace.metadata.id}
+        busy={busy}
+        mode={state.mode}
+        git={git}
+        checks={state.checks}
+        theme={theme}
+        importing={importing}
+        onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onSelect={switchWorkspace}
+        onNewTask={reset}
+        onOpenWorkspace={() => { setActiveNav('workspace'); setView('workspace') }}
+        onImportFolder={() => void openLocalFolder()}
+        onOpenProjects={() => { setActiveNav('projects'); setView('projects') }}
+      />
 
-        <nav className="sidebar-nav" aria-label="RBUILDER Desktop">
-          <span className="sidebar-label">Рабочая область</span>
-          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'home' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('home'); setView('home') }}>
-            <span className="sidebar-icon" aria-hidden="true">⌂</span> Главная
-          </button>
-          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'projects' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('projects'); setView('projects') }}>
-            <span className="sidebar-icon" aria-hidden="true">▣</span> Проекты
-          </button>
-          <button type="button" className="sidebar-link sidebar-link--button" onClick={() => { setActiveNav('home'); setView('workspace') }}>
-            <span className="sidebar-icon" aria-hidden="true">▤</span> Рабочая область
-          </button>
-          <button type="button" className="sidebar-link sidebar-link--button" onClick={() => void openLocalFolder()} disabled={busy || importing}>
-            <span className="sidebar-icon" aria-hidden="true">◇</span> {importing ? 'Импорт…' : 'Открыть папку'}
-          </button>
-          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'agents' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('agents'); setView('agents') }}>
-            <span className="sidebar-icon" aria-hidden="true">♙</span> Агенты
-          </button>
-          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'publish' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('publish'); setView('publish') }}>
-            <span className="sidebar-icon" aria-hidden="true">↑</span> Публикация
-          </button>
-          <button type="button" className={`sidebar-link sidebar-link--button${activeNav === 'settings' ? ' sidebar-link--active' : ''}`} onClick={() => { setActiveNav('settings'); setSettingsOpen(true) }}>
-            <span className="sidebar-icon" aria-hidden="true">⚙</span> Настройки
-          </button>
-        </nav>
-
-        <section className="sidebar-project-card" aria-label="Текущий проект">
-          <span className="sidebar-label">Текущий проект</span>
-          <label className="sidebar-project-switcher"><span className="project-mini-icon">R</span><select aria-label="Выбрать проект" value={workspace.metadata.id} onChange={(event) => switchWorkspace(event.target.value)}>{workspaces.map((entry) => <option key={entry.metadata.id} value={entry.metadata.id}>{entry.metadata.name}</option>)}</select></label>
-          <button type="button" className="sidebar-project-open" onClick={() => setView('workspace')}><strong>{workspace.metadata.name}</strong><small>{workspace.metadata.localPath ?? 'Локальный workspace'}</small></button>
-          <div className="sidebar-branch">
-            <span>Ветка</span>
-            <button
-              type="button"
-              className="sidebar-branch-value"
-              title="Открыть панель Git в рабочей области"
-              onClick={() => { setView('workspace'); setDockTab('git') }}
-            >
-              {git?.isRepo ? (git.branch ?? 'main') : `${workspace.metadata.activeBranch} · нет репозитория`}
-            </button>
+      <section className="zcode-chat" aria-label="Чат с агентом">
+        <header className="zcode-chat-head">
+          <h1 className="zcode-chat-title">{workspace.metadata.name}</h1>
+          <span className="zcode-chat-badge">{state.mode === 'plan' ? 'План' : busy ? 'Сборка…' : 'Готов'}</span>
+          <div className="zcode-chat-head-end">
+            {state.configured && state.model ? <span className="topbar-model">{state.model}</span> : null}
           </div>
-          <button type="button" className="sidebar-preview-status" onClick={() => { setView('workspace'); setDockTab('files') }}>
-            <span className={state.checks && state.checks.findings.length === 0 ? 'status-dot status-dot--ready' : 'status-dot'} />
-            {state.checks ? summarizeChecks(state.checks) : 'Живой просмотр'} <span>→</span>
-          </button>
-          <div className="sidebar-preview-url">
-            <span className="status-dot status-dot--ready" /> <span title={serverLabel()}>{serverLabel()}</span>
-          </div>
-          <div className="sidebar-build">
-            <span>Файлов в проекте</span><strong><i /> {state.project.files.length}</strong>
-          </div>
-          <div className="sidebar-build-meta">
-            <span>Изменений в git</span>
-            <span>{git?.isRepo ? `${git.changes}` : '—'}</span>
-          </div>
-          {git?.lastCommit ? (
-            <div className="sidebar-build-meta"><span>Коммит</span><span title={git.lastCommit}>{git.lastCommit}</span></div>
-          ) : null}
-        </section>
+        </header>
 
-        <div className="sidebar-bottom">
-          <button type="button" className="sidebar-link sidebar-link--button" onClick={() => setBrowserSessionOpen(true)}><span className="sidebar-icon" aria-hidden="true">◉</span> Сессии браузера</button>
-          <button type="button" className="sidebar-link sidebar-link--button" onClick={() => setSettingsOpen(true)}>
-            <span className="sidebar-icon" aria-hidden="true">{activeProvider.kind === 'ollama' || activeProvider.kind === 'lmstudio' ? '⌂' : '☁'}</span>
-            {state.configured ? activeProvider.name : 'Провайдер не настроен'}
-          </button>
-          <div className="sidebar-credits">
-            <span>{isDesktop() ? 'Приложение' : 'Режим'}</span>
-            <strong>{isDesktop() ? 'Desktop' : 'Web'}</strong>
-            <div className="credits-track"><i /></div>
-          </div>
-        </div>
-      </aside>
-      {sidebarCollapsed ? <button type="button" className="sidebar-reopen" onClick={() => setSidebarCollapsed(false)} aria-label="Показать боковую панель" title="Показать боковую панель">→</button> : null}
+        <ChatPanel
+          messages={state.messages}
+          busy={busy}
+          budget={budget}
+          configured={state.configured}
+          mode={state.mode}
+          plan={state.plan}
+          onModeChange={setMode}
+          onApprovePlan={approvePlan}
+          onSend={send}
+          onStop={stop}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+      </section>
 
-      <main className="main-shell" id="workspace">
-        {view === 'home' ? (
-          <DesktopHome
-            project={state.project}
-            workspace={workspace}
-            workspaces={workspaces}
-            configured={state.configured}
-            model={state.model ?? null}
-            provider={activeProvider}
-            mode={state.mode}
-            checks={state.checks}
-            onOpenWorkspace={() => setView('workspace')}
-            onOpenWorkspaceById={switchWorkspace}
-            onOpenProjects={() => { setActiveNav('projects'); setView('projects') }}
-            onOpenAgents={() => { setActiveNav('agents'); setView('agents') }}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onImportFolder={() => void openLocalFolder()}
-            importing={importing}
-            onNewProject={reset}
-          />
-        ) : null}
+      <InspectorPanel
+        tab={inspectorTab}
+        onTabChange={setInspectorTab}
+        project={state.project}
+        baselineProject={baselineProject}
+        document={previewDocument}
+        channel={channel}
+        filePaths={filePaths}
+        hasIndex={indexReady}
+        inspector={inspector}
+        dockTab={dockTab}
+        onDockTabChange={setDockTab}
+        checks={state.checks}
+        runningChecks={runningChecks}
+        git={git}
+        onRunChecks={() => void runProjectChecks()}
+        terminal={state.terminal}
+        terminalRunning={state.terminalRunning}
+        onRunCommand={(command) => void runTerminalCommand(command)}
+        onClearTerminal={() => dispatch({ type: 'terminal/clear' })}
+        onWriteFile={(path, content) => dispatch({ type: 'project/write', path, content })}
+        onDeleteFile={(path) => dispatch({ type: 'project/delete', path })}
+        onAskAgent={askAgentToFix}
+      />
 
-        {view === 'projects' ? (
-          <ProjectsView
-            workspaces={workspaces.length > 0 ? workspaces : [workspace]}
-            activeId={workspace.metadata.id}
-            onOpen={switchWorkspace}
-            onRename={renameWorkspace}
-            onDelete={deleteWorkspace}
-            onCreate={reset}
-            onImportFolder={() => void openLocalFolder()}
-            importing={importing}
-          />
-        ) : null}
-
-        {view === 'agents' ? (
-          <AgentsView
-            provider={activeProvider}
-            configured={state.configured}
-            model={state.model ?? null}
-            mode={state.mode}
-            onModeChange={setMode}
-            onOpenWorkspace={() => setView('workspace')}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onOpenBrowserSessions={() => setBrowserSessionOpen(true)}
-          />
-        ) : null}
-
-        {view === 'publish' ? (
-          <PublishView
-            project={state.project}
-            document={previewDocument}
-            checks={state.checks}
-            runningChecks={runningChecks}
-            onRunChecks={() => void runProjectChecks()}
-            onOpenWorkspace={() => { setView('workspace'); setDockTab('checks') }}
-          />
-        ) : null}
-
-        {view === 'workspace' ? (
-          <>
-            <header className="topbar">
-              <div className="breadcrumb">
-                <span className="breadcrumb-muted">Проекты</span>
-                <span aria-hidden="true">/</span>
-                <strong>{workspace.metadata.name}</strong>
-              </div>
-
-              <div className="topbar-end">
-                <span className="topbar-mode">{state.mode === 'plan' ? 'План' : 'Сборка'}</span>
-                {state.configured && state.model ? <span className="topbar-model">{state.model}</span> : null}
-              </div>
-            </header>
-
-            <div className="ide-workspace">
-              <div className="ide-chat-column">
-                <ChatPanel
-                  messages={state.messages}
-                  busy={busy}
-                  budget={budget}
-                  configured={state.configured}
-                  mode={state.mode}
-                  plan={state.plan}
-                  onModeChange={setMode}
-                  onApprovePlan={approvePlan}
-                  onSend={send}
-                  onStop={stop}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                />
-              </div>
-              <CodeWorkbench project={state.project} onWriteFile={(path, content) => dispatch({ type: 'project/write', path, content })} />
-              <div className="ide-preview-column">
-                <PreviewPane
-                  document={previewDocument}
-                  channel={channel}
-                  files={filePaths}
-                  project={state.project}
-                  baselineProject={baselineProject}
-                  hasIndex={indexReady}
-                  inspector={inspector}
-                  tab={dockTab}
-                  onTabChange={setDockTab}
-                  checks={state.checks}
-                  runningChecks={runningChecks}
-                  onRunChecks={() => void runProjectChecks()}
-                  terminal={state.terminal}
-                  terminalRunning={state.terminalRunning}
-                  onRunCommand={(command) => void runTerminalCommand(command)}
-                  onClearTerminal={() => dispatch({ type: 'terminal/clear' })}
-                  onWriteFile={(path, content) => dispatch({ type: 'project/write', path, content })}
-                  onDeleteFile={(path) => dispatch({ type: 'project/delete', path })}
-                  onAskAgent={askAgentToFix}
-                />
-              </div>
-            </div>
-          </>
-        ) : null}
-      </main>
       {browserSessionOpen ? <BrowserSessionPanel onClose={() => setBrowserSessionOpen(false)} /> : null}
       {settingsOpen ? (
         <SettingsPanel
@@ -747,14 +584,6 @@ function loadProviderProfiles(): ProviderProfile[] {
   return DEFAULT_PROVIDER_PROFILES
 }
 
-function loadActiveProviderId(): string {
-  try {
-    return localStorage.getItem('freebuff-web:active-provider') ?? 'openai'
-  } catch {
-    return 'openai'
-  }
-}
-
 function pickReplyText(input: {
   prose: string
   filesWritten: number
@@ -770,4 +599,12 @@ function pickReplyText(input: {
     return input.filesWritten === 1 ? 'Wrote 1 file.' : `Wrote ${input.filesWritten} files.`
   }
   return input.ok ? 'Done.' : 'No response.'
+}
+
+function loadActiveProviderId(): string {
+  try {
+    return localStorage.getItem('freebuff-web:active-provider') ?? 'openai'
+  } catch {
+    return 'openai'
+  }
 }
