@@ -302,6 +302,83 @@
   border-top: 1px solid var(--line);
 }
 
+/* Round accent send button + model chips, the zcode composer way. */
+.composer-actions-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.model-chip-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.model-chip {
+  appearance: none;
+  max-width: 150px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.model-chip:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.model-chip--model {
+  max-width: 200px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.send-button {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+
+.send-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.send-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.send-button--stop {
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-size: 11px;
+}
+
+.send-button--stop:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
 /* ------------------------------------------------------------------ */
 /* Inspector (right column)                                           */
 /* ------------------------------------------------------------------ */
@@ -401,6 +478,58 @@
 
 .inspector-row--static:hover {
   background: none;
+}
+
+.inspector-files {
+  list-style: none;
+  margin: 2px 0 4px;
+  padding: 0 0 0 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.inspector-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.inspector-file:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.inspector-file-icon {
+  flex: none;
+  font-size: 9px;
+  color: var(--fg-faint);
+}
+
+.inspector-file-path {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.inspector-file-diff {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .inspector-row-icon {

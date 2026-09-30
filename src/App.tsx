@@ -5,7 +5,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { BrowserSessionPanel } from './components/BrowserSessionPanel'
 import { TaskRail } from './components/TaskRail'
 import type { DockTab } from './components/PreviewPane'
-import { DEFAULT_PROVIDER_PROFILES, execCommand, fetchAgentConfig, type ProviderProfile } from './lib/agent'
+import { DEFAULT_PROVIDER_PROFILES, execCommand, fetchAgentConfig, testProvider, type ProviderProfile } from './lib/agent'
 import { apiBase, isDesktop } from './lib/apiBase'
 import { pickProjectFolder, type ImportedFolder } from './lib/desktop'
 import { GIT_CHANGED_EVENT, readGitState } from './lib/git'
@@ -61,6 +61,8 @@ export default function App() {
   const [, setView] = useState<View>('workspace')
   const [, setActiveNav] = useState<NavId>('workspace')
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('inspector')
+  /** Real model lists fetched from local providers, keyed by profile id. */
+  const [modelLists, setModelLists] = useState<Record<string, string[]>>({})
   const [importing, setImporting] = useState(false)
   const [git, setGit] = useState<GitSummary | null>(null)
   const [browserSessionOpen, setBrowserSessionOpen] = useState(false)
@@ -186,6 +188,29 @@ export default function App() {
     const providerReady = Boolean(activeProvider.baseUrl.trim() && activeProvider.model.trim() && (activeProvider.apiKey.trim() || activeProvider.kind === 'ollama' || activeProvider.kind === 'lmstudio'))
     dispatch({ type: 'app/meta', configured: providerReady, model: providerReady ? activeProvider.model : undefined })
   }, [activeProvider])
+
+  // Local providers answer instantly: fetch their model list once so the
+  // composer chip can offer real ids without opening Settings.
+  useEffect(() => {
+    const provider = activeProvider
+    const local = provider.kind === 'ollama' || provider.kind === 'lmstudio'
+    if (!local || modelLists[provider.id]) return
+    let cancelled = false
+    void testProvider(provider).then((result) => {
+      if (!cancelled && result.ok && result.models.length > 0) {
+        setModelLists((current) => ({ ...current, [provider.id]: result.models }))
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [activeProvider, modelLists])
+
+  const composerModels = providerList.map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    models: modelLists[provider.id] ?? [],
+  }))
 
   const applyFiles = useCallback((files: { path: string; content: string }[]) => {
     if (files.length === 0) return
@@ -524,6 +549,15 @@ export default function App() {
           onSend={send}
           onStop={stop}
           onOpenSettings={() => setSettingsOpen(true)}
+          providerName={activeProvider.name}
+          model={state.model ?? activeProvider.model}
+          models={composerModels}
+          activeProviderId={activeProviderId}
+          onProviderChange={setActiveProviderId}
+          onModelChange={(model) => {
+            setProviders((current) => current.map((entry) => entry.id === activeProviderId ? { ...entry, model } : entry))
+            dispatch({ type: 'app/meta', configured: true, model })
+          }}
         />
       </section>
 

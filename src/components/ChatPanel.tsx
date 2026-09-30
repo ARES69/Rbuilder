@@ -19,6 +19,13 @@ type Props = {
   onSend: (text: string, attachments: AttachmentMeta[]) => void
   onStop: () => void
   onOpenSettings: () => void
+  /** Provider + model shown in the composer, switchable in place. */
+  providerName: string
+  model: string | null
+  models: { id: string; name: string; models: string[] }[]
+  activeProviderId: string
+  onProviderChange: (id: string) => void
+  onModelChange: (model: string) => void
 }
 
 export const EXAMPLES = [
@@ -39,6 +46,12 @@ export function ChatPanel({
   onSend,
   onStop,
   onOpenSettings,
+  providerName,
+  model,
+  models,
+  activeProviderId,
+  onProviderChange,
+  onModelChange,
 }: Props) {
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
@@ -137,6 +150,12 @@ export function ChatPanel({
         mode={mode}
         onModeChange={onModeChange}
         onOpenSettings={onOpenSettings}
+        providerName={providerName}
+        model={model}
+        models={models}
+        activeProviderId={activeProviderId}
+        onProviderChange={onProviderChange}
+        onModelChange={onModelChange}
       />
 
       {dragging ? (

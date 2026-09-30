@@ -22,6 +22,13 @@ type Props = {
   mode: AgentMode
   onModeChange: (mode: AgentMode) => void
   onOpenSettings: () => void
+  /** Provider + model shown in the composer, switchable in place. */
+  providerName: string
+  model: string | null
+  models: { id: string; name: string; models: string[] }[]
+  activeProviderId: string
+  onProviderChange: (id: string) => void
+  onModelChange: (model: string) => void
 }
 
 const MAX_TEXTAREA_HEIGHT = 208
@@ -42,6 +49,11 @@ export function Composer({
   mode,
   onModeChange,
   onOpenSettings,
+  model,
+  models,
+  activeProviderId,
+  onProviderChange,
+  onModelChange,
 }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -141,15 +153,56 @@ export function Composer({
             )}
           </div>
 
-          {busy ? (
-            <button
-              type="button"
-              className="button button--quiet"
-              onClick={onStop}
-              title="Остановить агента">Остановить</button>
-          ) : (
-            <button type="button" className="button" onClick={onSend} disabled={!canSend}>Отправить</button>
-          )}
+          <div className="composer-actions-right">
+            {/* Model chip + send button, the zcode composer way. */}
+            <div className="model-chip-group">
+              <select
+                className="model-chip"
+                value={activeProviderId}
+                onChange={(event) => onProviderChange(event.target.value)}
+                aria-label="Провайдер"
+                title="Провайдер"
+              >
+                {models.map((entry) => (
+                  <option key={entry.id} value={entry.id}>{entry.name}</option>
+                ))}
+              </select>
+              {model ? (
+                <select
+                  className="model-chip model-chip--model"
+                  value={model}
+                  onChange={(event) => onModelChange(event.target.value)}
+                  aria-label="Модель"
+                  title="Модель"
+                >
+                  {(() => {
+                    const current = models.find((entry) => entry.id === activeProviderId)
+                    const list = current?.models?.length ? current.models : [model]
+                    if (!list.includes(model)) list.unshift(model)
+                    return list.map((entry) => <option key={entry} value={entry}>{entry}</option>)
+                  })()}
+                </select>
+              ) : null}
+            </div>
+            {busy ? (
+              <button
+                type="button"
+                className="send-button send-button--stop"
+                onClick={onStop}
+                title="Остановить агента"
+                aria-label="Остановить"
+              >■</button>
+            ) : (
+              <button
+                type="button"
+                className="send-button"
+                onClick={onSend}
+                disabled={!canSend}
+                title="Отправить (Enter)"
+                aria-label="Отправить"
+              >↑</button>
+            )}
+          </div>
         </div>
       </div>
     </div>

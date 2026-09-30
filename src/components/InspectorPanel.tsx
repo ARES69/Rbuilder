@@ -52,8 +52,24 @@ export function InspectorPanel(props: Props) {
       }),
     [project.files, baselineProject.files],
   )
-  const addedCount = changed.filter((file) => !baselineProject.files.some((entry) => entry.path === file.path)).length
-  const modifiedCount = changed.length - addedCount
+
+  /** Per-file +N -N, the way the Git tools card shows them. */
+  const lineDiff = useMemo(
+    () =>
+      changed.map((file) => {
+        const baseline = baselineProject.files.find((entry) => entry.path === file.path)
+        const before = baseline ? baseline.content.split('\n') : []
+        const after = file.content.split('\n')
+        const beforeSet = new Set(before)
+        const afterSet = new Set(after)
+        const added = after.filter((line) => line.trim() && !beforeSet.has(line)).length
+        const removed = before.filter((line) => line.trim() && !afterSet.has(line)).length
+        return { path: file.path, added, removed, isNew: !baseline }
+      }),
+    [changed, baselineProject.files],
+  )
+  const addedCount = lineDiff.reduce((sum, entry) => sum + entry.added, 0)
+  const removedCount = lineDiff.reduce((sum, entry) => sum + entry.removed, 0)
 
   const inspectorCard = (
     <div className="inspector-card">
@@ -68,9 +84,24 @@ export function InspectorPanel(props: Props) {
             <small>{changed.length === 0 ? 'нет изменений' : `${changed.length} файлов`}</small>
           </span>
           <span className="inspector-diff">
-            <em className="inspector-add">+{addedCount}</em> <em className="inspector-del">-{modifiedCount}</em>
+            <em className="inspector-add">+{addedCount}</em> <em className="inspector-del">-{removedCount}</em>
           </span>
         </button>
+        {lineDiff.length > 0 ? (
+          <ul className="inspector-files">
+            {lineDiff.slice(0, 6).map((entry) => (
+              <li key={entry.path}>
+                <button type="button" className="inspector-file" onClick={() => { onTabChange('code'); props.onDockTabChange('files') }}>
+                  <span className="inspector-file-icon" aria-hidden="true">{fileIcon(entry.path)}</span>
+                  <span className="inspector-file-path">{entry.path}</span>
+                  <span className="inspector-file-diff">
+                    <em className="inspector-add">+{entry.added}</em> <em className="inspector-del">-{entry.removed}</em>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="inspector-row inspector-row--static">
           <span className="inspector-row-icon" aria-hidden="true">⑂</span>
           <span className="inspector-row-main">
@@ -177,4 +208,28 @@ function describeGoal(project: Project): string {
     if (title) return title
   }
   return 'Собрать приложение из текущего чата'
+}
+
+/** A tiny file-type glyph, in the spirit of ZCode's material icons. */
+function fileIcon(path: string): string {
+  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+  switch (extension) {
+    case 'html':
+    case 'htm':
+      return '\u25C9'
+    case 'css':
+      return '\u25A0'
+    case 'js':
+    case 'mjs':
+      return '\u25CF'
+    case 'ts':
+    case 'tsx':
+      return '\u25B2'
+    case 'json':
+      return '\u25A6'
+    case 'md':
+      return '\u25AB'
+    default:
+      return '\u25AB'
+  }
 }
