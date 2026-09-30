@@ -81,3 +81,15 @@ rbuilder.exe (Tauri, WebView2)
 ```
 
 Сервер — тот же код, что и `pnpm start` в репозитории; в десктопе он компилируется в один exe, чтобы не требовать Node.js на машине пользователя.
+
+## Процесс изменений
+
+Ветка `main` защищена: прямые пуши отклоняются (в том числе для администратора), force-push и удаление запрещены. Изменения проходят через pull request — workflow `desktop-release` гоняет typecheck, тесты и сборку фронта; зелёный чек `build-windows` обязателен для мерджа. Релизы не меняются: тег `vX.Y.Z` собирает MSI и NSIS и прикладывает их к GitHub Release.
+
+```powershell
+git checkout -b my-change
+# … изменения …
+git commit -m "my change"
+git push -u origin my-change
+# открой PR в GitHub, дождись зелёного build-windows, жми Merge
+```

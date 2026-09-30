@@ -10,14 +10,6 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
-    paths:
-      - "src/**"
-      - "server/**"
-      - "src-tauri/**"
-      - "tests/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/desktop-release.yml"
   workflow_dispatch:
 
 permissions:
