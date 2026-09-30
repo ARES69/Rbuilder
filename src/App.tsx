@@ -68,6 +68,15 @@ export default function App() {
   const [browserSessionOpen, setBrowserSessionOpen] = useState(false)
   const [providers, setProviders] = useState<ProviderProfile[]>(loadProviderProfiles)
   const [activeProviderId, setActiveProviderId] = useState(() => loadActiveProviderId())
+  // Saved provider lists from older builds may miss entries the current presets
+  // define (for example the LM Studio profile), so the defaults always back the
+  // saved list up instead of the settings dialog silently offering less.
+  const providerList = useMemo(() => {
+    const seen = new Set(providers.map((provider) => provider.id))
+    const restored = DEFAULT_PROVIDER_PROFILES.filter((provider) => !seen.has(provider.id))
+    return [...providers, ...restored]
+  }, [providers])
+  const activeProvider = providerList.find((provider) => provider.id === activeProviderId) ?? providerList[0]
   const [baselineProject, setBaselineProject] = useState<Project>(() => loadState().project)
   // The workspace that was open comes back as it was: a fresh id on every reload
   // is what used to fill the project list with copies of the same project.
@@ -82,7 +91,6 @@ export default function App() {
   // replaced frame cannot answer for the current preview.
   const channel = useMemo(() => channelFor(state.project), [state.project])
   const inspector = useMemo(() => new PreviewInspector(), [])
-  const activeProvider = providers.find((provider) => provider.id === activeProviderId) ?? providers[0]
 
   const stateRef = useRef(state)
   const projectRef = useRef(state.project)
@@ -168,6 +176,15 @@ export default function App() {
     })
     return () => controller.abort()
   }, [])
+
+  // The active profile is what actually travels with every request, so its
+  // completeness — not the server's default env config — is what "configured"
+  // means in the UI. Without this the label kept saying "not configured" after
+  // a local provider was set up, and the composer kept its warning up.
+  useEffect(() => {
+    const providerReady = Boolean(activeProvider.baseUrl.trim() && activeProvider.model.trim() && (activeProvider.apiKey.trim() || activeProvider.kind === 'ollama' || activeProvider.kind === 'lmstudio'))
+    dispatch({ type: 'app/meta', configured: providerReady, model: providerReady ? activeProvider.model : undefined })
+  }, [activeProvider])
 
   const applyFiles = useCallback((files: { path: string; content: string }[]) => {
     if (files.length === 0) return
@@ -701,10 +718,15 @@ export default function App() {
       {browserSessionOpen ? <BrowserSessionPanel onClose={() => setBrowserSessionOpen(false)} /> : null}
       {settingsOpen ? (
         <SettingsPanel
-          profiles={providers}
+          profiles={providerList}
           activeId={activeProviderId}
           onActiveChange={setActiveProviderId}
-          onSave={(profile) => setProviders((current) => current.map((entry) => entry.id === profile.id ? profile : entry))}
+          onSave={(profile) => setProviders((current) => {
+            const exists = current.some((entry) => entry.id === profile.id)
+            return exists
+              ? current.map((entry) => entry.id === profile.id ? profile : entry)
+              : [...current, profile]
+          })}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
