@@ -47,6 +47,33 @@ export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/**
+ * CORS for the API routes.
+ *
+ * The desktop front end is served from a custom origin (`http://tauri.localhost`
+ * and friends) while the API listens on `127.0.0.1:<random port>` — a cross-origin
+ * pair, so the WebView demands CORS headers and a preflight before POSTing JSON.
+ * The browser build is same-origin and simply never notices them. No credentials
+ * are involved (the API key travels in the body), so `*` is safe.
+ *
+ * Returns true when the request was an answered preflight and is done.
+ */
+export function applyCors(req: IncomingMessage, res: ServerResponse): boolean {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  if (req.method !== 'OPTIONS') return false
+
+  const requested = req.headers['access-control-request-headers']
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    typeof requested === 'string' && requested ? requested : 'Content-Type',
+  )
+  res.setHeader('Access-Control-Max-Age', '600')
+  res.statusCode = 204
+  res.end()
+  return true
+}
+
 export function isAbort(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')
 }

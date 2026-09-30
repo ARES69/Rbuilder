@@ -35,7 +35,7 @@ import {
 import { budgetNotice, WRAP_UP_PROMPT } from '../src/lib/budget'
 import { materializeProject, refusalFor, runCommand, type CommandFile } from './workspace'
 import { allowPrivateFor, handleProxy } from './api-proxy'
-import { isAbort, messageOf, readBody, sendJson, writeLine } from './http'
+import { applyCors, isAbort, messageOf, readBody, sendJson, writeLine } from './http'
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1'
 const DEFAULT_MODEL = 'gpt-4o-mini'
@@ -102,6 +102,8 @@ export function createApiHandlers(
     providerTest: (req, res) => handleProviderTest(req, res),
     proxy: (req, res) => handleProxy(req, res, allowPrivate),
     health: (req, res) => {
+      if (applyCors(req, res)) return
+
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         sendJson(res, 405, { message: 'Use GET /api/health.' })
         return
@@ -226,6 +228,8 @@ async function handleChat(
   res: ServerResponse,
   config: LlmConfig | null,
 ): Promise<void> {
+  if (applyCors(req, res)) return
+
   if (req.method === 'GET') {
     sendJson(res, 200, { configured: Boolean(config), model: config?.model })
     return
@@ -495,6 +499,8 @@ function parseChunk(payload: string): {
 /* ------------------------------------------------------------------ */
 
 async function handleProviderTest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (applyCors(req, res)) return
+
   if (req.method !== 'POST') {
     sendJson(res, 405, { message: 'Use POST /api/provider-test.' })
     return
@@ -543,6 +549,8 @@ async function handleProviderTest(req: IncomingMessage, res: ServerResponse): Pr
 /* ------------------------------------------------------------------ */
 
 async function handleExec(req: IncomingMessage, res: ServerResponse, root: string): Promise<void> {
+  if (applyCors(req, res)) return
+
   if (req.method !== 'POST') {
     sendJson(res, 405, { message: 'Use POST /api/exec.' })
     return

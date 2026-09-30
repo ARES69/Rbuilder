@@ -1,7 +1,7 @@
 {
   "name": "rbuilder",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "RBUILDER — a local AI development workspace with chat, preview, agents, APIs, and Git tooling.",
   "type": "module",
   "scripts": {

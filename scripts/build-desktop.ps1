@@ -17,7 +17,7 @@ if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host '==> 3/4 sidecar executable' -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path .freebuff-build | Out-Null
-bun build dist-server/index.js --compile --outfile .freebuff-build/rbuilder-server.exe
+pnpm exec bun build dist-server/index.js --compile --outfile .freebuff-build/rbuilder-server.exe
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host '==> 4/4 Tauri shell (MSI + NSIS)' -ForegroundColor Cyan

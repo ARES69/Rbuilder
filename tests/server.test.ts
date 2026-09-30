@@ -55,6 +55,27 @@ describe('production server', () => {
     expect(await response.json()).toEqual({ configured: false })
   })
 
+  it('answers CORS preflights for every API route', async () => {
+    for (const route of ['/api/chat', '/api/provider-test', '/api/exec', '/api/proxy', '/api/health']) {
+      const response = await fetch(`${base}${route}`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'http://tauri.localhost',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'content-type',
+        },
+      })
+      expect(response.status, route).toBe(204)
+      expect(response.headers.get('access-control-allow-origin'), route).toBe('*')
+      expect(response.headers.get('access-control-allow-headers'), route).toContain('content-type')
+    }
+  })
+
+  it('stamps API responses with the CORS origin header', async () => {
+    const response = await fetch(`${base}/api/health`, { headers: { Origin: 'http://tauri.localhost' } })
+    expect(response.headers.get('access-control-allow-origin')).toBe('*')
+  })
+
   it('serves the built front end and falls back to index.html for routes', async () => {
     const root = await fetch(`${base}/`)
     expect(root.status).toBe(200)
