@@ -50,6 +50,15 @@ pnpm exec tauri build
 
 Откройте Settings в приложении. Ollama и LM Studio работают без ключей (нужен только адрес локального сервера провайдера); для OpenAI/Anthropic впишите ключ в Settings — он хранится локально в файле настроек рабочей области и никуда не отправляется, кроме выбранного провайдера.
 
+## Релизы через GitHub Actions
+
+Пуш тега `v*` (например, `v0.1.1`) запускает workflow [desktop-release](.github/workflows/desktop-release.yml): он typecheck'ает, гоняет тесты, собирает MSI и NSIS на `windows-latest` и прикрепляет оба установщика к GitHub Release с автогенерированными release notes. Запустить сборку без тега можно вручную: вкладка Actions → desktop-release → Run workflow (артефакты появятся в самом запуске).
+
+```powershell
+git tag -a v0.1.1 -m "RBuilder 0.1.1"
+git push origin v0.1.1
+```
+
 ## Устранение неполадок
 
 **Окно не открывается.** Загляните в `%LOCALAPPDATA%\RBUILDER\workspace\.rbuilder-server.log`. Ошибки вида `cannot start ... rbuilder-server` означают, что sidecar не найден рядом с `rbuilder.exe` — переустановите приложение или проверьте, что оба exe в одной папке.
