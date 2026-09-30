@@ -11,6 +11,12 @@
 .settings-input:focus { border-color: var(--fg-muted); }
 .settings-status { margin: 15px 0 0; padding: 9px 10px; border-left: 2px solid var(--fg); color: var(--fg-muted); font-size: 12px; }
 .settings-status--ok { border-left-color: #8fac63; }
+.model-field-row { display: flex; gap: 6px; }
+.model-field-row .settings-input { flex: 1; }
+.model-refresh-button { appearance: none; flex: 0 0 auto; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-subtle); color: var(--fg-muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.model-refresh-button:hover:not(:disabled) { border-color: var(--fg-muted); color: var(--fg); }
+.model-refresh-button:disabled { opacity: .5; cursor: default; }
+.model-pick { margin-top: 6px; color: var(--fg-muted); font-size: 12px; }
 .browser-session-panel { max-width: 520px; }
 .browser-session-status { display: flex; align-items: flex-start; gap: 10px; margin: 18px 0; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-subtle); }
 .browser-session-status .status-dot { margin-top: 5px; }

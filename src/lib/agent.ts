@@ -36,6 +36,18 @@ export type StepRequest = {
 
 export type AgentConfig = { configured: boolean; model?: string }
 
+/**
+ * The model id to use after the provider answers with its real list. Keep the
+ * current one when the server knows it; otherwise adopt the first real id —
+ * placeholders like LM Studio's `local-model` are guesses until now. Null means
+ * "keep what the user typed".
+ */
+export function pickModel(current: string, models: string[]): string | null {
+  if (models.length === 0) return null
+  if (models.includes(current)) return null
+  return models[0]
+}
+
 export const DEFAULT_PROVIDER_PROFILES: ProviderProfile[] = [
   { id: 'openai', name: 'OpenAI', kind: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
   { id: 'ollama', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:11434/v1', apiKey: 'ollama', model: 'qwen2.5-coder:7b' },
