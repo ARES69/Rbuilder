@@ -61,6 +61,8 @@ export default function App() {
   const [, setView] = useState<View>('workspace')
   const [, setActiveNav] = useState<NavId>('workspace')
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('inspector')
+  /** A changed file asked for by the transcript or the inspector. */
+  const [focusFile, setFocusFile] = useState<string | null>(null)
   /** Real model lists fetched from local providers, keyed by profile id. */
   const [modelLists, setModelLists] = useState<Record<string, string[]>>({})
   const [importing, setImporting] = useState(false)
@@ -78,7 +80,6 @@ export default function App() {
     return [...providers, ...restored]
   }, [providers])
   const activeProvider = providerList.find((provider) => provider.id === activeProviderId) ?? providerList[0]
-  const [baselineProject, setBaselineProject] = useState<Project>(() => loadState().project)
   // The workspace that was open comes back as it was: a fresh id on every reload
   // is what used to fill the project list with copies of the same project.
   const [workspace, setWorkspace] = useState<Workspace>(() => {
@@ -86,6 +87,9 @@ export default function App() {
     const activeId = readActiveWorkspaceId(window.localStorage)
     return saved.find((entry) => entry.metadata.id === activeId) ?? createWorkspace(loadState().project)
   })
+  // Baseline follows the workspace, not the persisted project: otherwise every
+  // reload made the workspace look unmodified and the diff had nothing to show.
+  const [baselineProject, setBaselineProject] = useState<Project>(() => workspace.baseline)
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => readStoredWorkspaces(window.localStorage))
 
   // The channel is a function of the project, so every build has its own and a
@@ -347,6 +351,12 @@ export default function App() {
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
 
+  /** Opens a changed file in the code column; changed files land on their diff. */
+  const openFile = useCallback((path: string) => {
+    setFocusFile(path)
+    setInspectorTab('code')
+  }, [])
+
   /** Reverts the newest turn's writes to their pre-turn content. */
   const undoLastTurn = useCallback((message: ChatMessage) => {
     if (busyRef.current) return
@@ -582,10 +592,7 @@ export default function App() {
           onStop={stop}
           onOpenSettings={() => setSettingsOpen(true)}
           files={state.project.files}
-          onOpenFile={() => {
-            setInspectorTab('code')
-            setDockTab('files')
-          }}
+          onOpenFile={openFile}
           onUndo={undoLastTurn}
           providerName={activeProvider.name}
           model={state.model ?? activeProvider.model}
@@ -623,6 +630,8 @@ export default function App() {
         onWriteFile={(path, content) => dispatch({ type: 'project/write', path, content })}
         onDeleteFile={(path) => dispatch({ type: 'project/delete', path })}
         onAskAgent={askAgentToFix}
+        onOpenFile={openFile}
+        focusFile={focusFile}
       />
 
       {browserSessionOpen ? <BrowserSessionPanel onClose={() => setBrowserSessionOpen(false)} /> : null}
