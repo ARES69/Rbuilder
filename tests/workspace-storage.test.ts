@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { createStarterProject } from '../src/lib/project'
+import type { Project } from '../src/lib/project'
+
+const sample = (): Project => ({
+  files: [
+    { path: 'index.html', content: '<h1>hi</h1>' },
+    { path: 'styles.css', content: 'body { color: blue }' },
+  ],
+})
 import {
   ACTIVE_WORKSPACE_STORAGE_KEY,
   createWorkspace,
@@ -25,7 +32,7 @@ function memoryStorage(seed: Record<string, string> = {}) {
 describe('workspace storage', () => {
   it('round-trips a workspace list', () => {
     const storage = memoryStorage()
-    const workspace = createWorkspace(createStarterProject(), 'shop')
+    const workspace = createWorkspace(sample(), 'shop')
     saveStoredWorkspaces(storage, [workspace])
 
     const restored = readStoredWorkspaces(storage)
@@ -41,7 +48,7 @@ describe('workspace storage', () => {
   })
 
   it('keeps one entry when a reload copied the open project', () => {
-    const project = createStarterProject()
+    const project = sample()
     const first = createWorkspace(project, 'Untitled project')
     const second = createWorkspace(project, 'Untitled project')
     expect(second.metadata.id).not.toBe(first.metadata.id)
@@ -50,8 +57,8 @@ describe('workspace storage', () => {
   })
 
   it('keeps genuinely different projects apart', () => {
-    const a = createWorkspace(createStarterProject(), 'shop')
-    const other = createStarterProject()
+    const a = createWorkspace(sample(), 'shop')
+    const other = sample()
     other.files[0]!.content = `${other.files[0]!.content}\n<!-- changed -->`
     const b = createWorkspace(other, 'shop')
     expect(dedupeWorkspaces([a, b])).toHaveLength(2)

@@ -11,76 +11,12 @@ export const MAX_FILES = 40
 export const MAX_FILE_BYTES = 512 * 1024
 export const INDEX_PATH = 'index.html'
 
-export const STARTER_HTML = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Your app</title>
-  </head>
-  <body>
-    <main>
-      <p class="eyebrow">Live preview</p>
-      <h1>Describe the app you want to build</h1>
-      <p class="lede">
-        RBUILDER writes the HTML, CSS and JavaScript for you. Every change lands here
-        the moment it is written.
-      </p>
-    </main>
-  </body>
-</html>
-`
-
-export const STARTER_CSS = `:root {
-  color-scheme: light;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-}
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  background: #ffffff;
-  color: #111111;
-}
-
-main {
-  max-width: 34rem;
-  padding: 3rem 2rem;
-}
-
-.eyebrow {
-  margin: 0 0 1rem;
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #8a8a8a;
-}
-
-h1 {
-  margin: 0 0 1.25rem;
-  font-size: 1.75rem;
-  font-weight: 500;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
-}
-
-.lede {
-  margin: 0;
-  font-size: 0.9375rem;
-  line-height: 1.7;
-  color: #515151;
-}
-`
-
-export function createStarterProject(): Project {
-  return {
-    files: [
-      { path: INDEX_PATH, content: STARTER_HTML },
-      { path: 'styles.css', content: STARTER_CSS },
-    ],
-  }
+/**
+ * A fresh project starts empty: everything the model writes lands in the folder
+ * the user picked for the task, so there are no placeholder files to delete.
+ */
+export function emptyProject(): Project {
+  return { files: [] }
 }
 
 /**

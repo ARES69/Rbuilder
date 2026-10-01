@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildPreviewDocument,
-  createStarterProject,
+  emptyProject,
   hasIndex,
   normalizePath,
   projectContext,
@@ -30,8 +30,15 @@ describe('normalizePath', () => {
 })
 
 describe('upsertFiles', () => {
+  const sample = (): Project => ({
+    files: [
+      { path: 'index.html', content: '<h1>hi</h1>' },
+      { path: 'styles.css', content: 'body { color: blue }' },
+    ],
+  })
+
   it('replaces a file in place and keeps ordering stable', () => {
-    const project = createStarterProject()
+    const project = sample()
     const next = upsertFiles(project, [{ path: 'styles.css', content: 'body { color: red }' }])
 
     expect(next.files.map((file) => file.path)).toEqual(project.files.map((file) => file.path))
@@ -39,7 +46,7 @@ describe('upsertFiles', () => {
   })
 
   it('appends new files and ignores invalid paths', () => {
-    const project = createStarterProject()
+    const project = sample()
     const next = upsertFiles(project, [
       { path: 'app.js', content: 'console.log(1)' },
       { path: '../escape.js', content: 'nope' },
@@ -49,10 +56,15 @@ describe('upsertFiles', () => {
   })
 
   it('returns the same project when nothing changed', () => {
-    const project = createStarterProject()
+    const project = sample()
     expect(upsertFiles(project, [{ path: 'index.html', content: project.files[0]!.content }])).toBe(
       project,
     )
+  })
+
+  it('starts from an empty project', () => {
+    const next = upsertFiles(emptyProject(), [{ path: 'index.html', content: '<h1>hi</h1>' }])
+    expect(next.files.map((file) => file.path)).toEqual(['index.html'])
   })
 })
 
@@ -117,9 +129,10 @@ describe('buildPreviewDocument', () => {
 
 describe('project helpers', () => {
   it('detects a missing index and describes the project for the model', () => {
-    expect(hasIndex(createStarterProject())).toBe(true)
+    expect(hasIndex({ files: [{ path: 'index.html', content: '<h1>x</h1>' }] })).toBe(true)
     expect(hasIndex({ files: [] })).toBe(false)
-    expect(projectContext({ files: [] })).toBe('The project is currently empty.')
-    expect(projectContext(createStarterProject())).toContain('index.html')
+    expect(hasIndex(emptyProject())).toBe(false)
+    expect(projectContext(emptyProject())).toBe('The project is currently empty.')
+    expect(projectContext({ files: [{ path: 'index.html', content: '<h1>x</h1>' }] })).toContain('index.html')
   })
 })

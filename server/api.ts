@@ -20,6 +20,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { stat } from 'node:fs/promises'
+import path from 'node:path'
 import { z } from 'zod'
 import {
   accumulateToolCalls,
@@ -33,7 +35,7 @@ import {
   type StreamEvent,
 } from '../src/lib/protocol'
 import { budgetNotice, WRAP_UP_PROMPT } from '../src/lib/budget'
-import { materializeProject, refusalFor, runCommand, type CommandFile } from './workspace'
+import { materializeProject, refusalFor, runCommand, writeProjectInto, type CommandFile } from './workspace'
 import { allowPrivateFor, handleProxy } from './api-proxy'
 import { applyCors, isAbort, messageOf, readBody, sendJson, writeLine } from './http'
 
@@ -215,6 +217,8 @@ const chatRequestSchema = z.object({
 const execRequestSchema = z.object({
   command: z.string().max(400),
   files: z.array(z.object({ path: z.string().max(300), content: z.string().max(600_000) })).max(60),
+  /** When set, the command runs in this bound project folder instead of the scratch copy. */
+  cwd: z.string().max(500).optional(),
 })
 
 type RawTurn = z.infer<typeof turnSchema>
@@ -578,7 +582,9 @@ async function handleExec(req: IncomingMessage, res: ServerResponse, root: strin
 
   let cwd: string
   try {
-    cwd = await materializeProject(root, parsed.files as CommandFile[])
+    cwd = parsed.cwd
+      ? await resolveBoundFolder(parsed.cwd, parsed.files as CommandFile[])
+      : await materializeProject(root, parsed.files as CommandFile[])
   } catch (error) {
     writeLine(res, { type: 'error', message: `Could not prepare the workspace: ${messageOf(error)}` })
     writeLine(res, { type: 'exit', code: null, timedOut: false })
@@ -588,6 +594,22 @@ async function handleExec(req: IncomingMessage, res: ServerResponse, root: strin
 
   await runCommand(parsed.command, cwd, (event) => writeLine(res, event))
   res.end()
+}
+
+/**
+ * A bound project folder: absolute, existing, and it receives the current
+ * project files, so the command sees the same tree the preview does.
+ */
+async function resolveBoundFolder(candidate: string, files: CommandFile[]): Promise<string> {
+  const dir = path.resolve(candidate)
+  if (!path.isAbsolute(dir)) {
+    throw new Error('the project folder must be an absolute path')
+  }
+  const info = await stat(dir).catch(() => null)
+  if (!info?.isDirectory()) {
+    throw new Error('the project folder does not exist')
+  }
+  return writeProjectInto(dir, files)
 }
 
 /* ------------------------------------------------------------------ */

@@ -8,7 +8,16 @@ import { TaskRail } from './components/TaskRail'
 import type { DockTab } from './components/PreviewPane'
 import { DEFAULT_PROVIDER_PROFILES, execCommand, fetchAgentConfig, testProvider, type ProviderProfile } from './lib/agent'
 import { apiBase, isDesktop } from './lib/apiBase'
-import { pickProjectFolder, type ImportedFolder } from './lib/desktop'
+import {
+  deleteProjectFile,
+  deleteViaDirectoryHandle,
+  pickProjectFolder,
+  pickProjectFolderPath,
+  writeProjectFiles,
+  writeViaDirectoryHandle,
+  type DirectoryHandle,
+  type ImportedFolder,
+} from './lib/desktop'
 import { GIT_CHANGED_EVENT, readGitState } from './lib/git'
 import { attachmentsToContext, type AttachmentMeta } from './lib/attachments'
 import type { Budget } from './lib/budget'
@@ -16,6 +25,7 @@ import { runChecks, type ChecksResult } from './lib/checks'
 import { channelFor, PreviewInspector } from './lib/inspector'
 import {
   buildPreviewDocument,
+  emptyProject,
   hasIndex,
   projectContext,
   projectFilePaths,
@@ -68,6 +78,39 @@ export default function App() {
   /** Ask mode: the batch of writes currently waiting for (or declined by) the user. */
   const [approval, setApproval] = useState<Approval | null>(null)
   const approvalResolver = useRef<((ok: boolean) => void) | null>(null)
+  /**
+   * The real folder this project's files live in: the model writes land there,
+   * and the terminal and git run inside it. Desktop keeps the path; the browser
+   * keeps a File System Access handle.
+   */
+  const folderRef = useRef<string | null>(null)
+  const folderHandleRef = useRef<DirectoryHandle | null>(null)
+
+  /** Best-effort sync of model writes into the bound folder. */
+  const mirrorWrites = useCallback(async (files: { path: string; content: string }[]) => {
+    if (files.length === 0) return
+    try {
+      if (isDesktop()) {
+        if (folderRef.current) await writeProjectFiles(folderRef.current, files)
+      } else if (folderHandleRef.current) {
+        await writeViaDirectoryHandle(folderHandleRef.current, files)
+      }
+    } catch (error) {
+      console.warn('Не удалось записать файлы в папку проекта:', error)
+    }
+  }, [])
+
+  const mirrorDelete = useCallback(async (path: string) => {
+    try {
+      if (isDesktop()) {
+        if (folderRef.current) await deleteProjectFile(folderRef.current, path)
+      } else if (folderHandleRef.current) {
+        await deleteViaDirectoryHandle(folderHandleRef.current, path)
+      }
+    } catch (error) {
+      console.warn('Не удалось удалить файл из папки проекта:', error)
+    }
+  }, [])
   /** Real model lists fetched from local providers, keyed by profile id. */
   const [modelLists, setModelLists] = useState<Record<string, string[]>>({})
   const [importing, setImporting] = useState(false)
@@ -96,6 +139,10 @@ export default function App() {
   // reload made the workspace look unmodified and the diff had nothing to show.
   const [baselineProject, setBaselineProject] = useState<Project>(() => workspace.baseline)
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => readStoredWorkspaces(window.localStorage))
+
+  useEffect(() => {
+    folderRef.current = workspace.metadata.localPath
+  }, [workspace.metadata.localPath])
 
   // The channel is a function of the project, so every build has its own and a
   // replaced frame cannot answer for the current preview.
@@ -147,10 +194,11 @@ export default function App() {
 
   useEffect(() => inspector.connect(), [inspector])
 
-  // The sidebar reports what the terminal workspace really is.
+  // The sidebar reports what the terminal workspace really is — the bound
+  // project folder when there is one, the scratch copy otherwise.
   const refreshGit = useCallback(() => {
     const files = projectRef.current.files.map((file) => ({ path: file.path, content: file.content }))
-    void readGitState(files).then((next) =>
+    void readGitState(files, undefined, folderRef.current ?? undefined).then((next) =>
       setGit({
         isRepo: next.isRepo,
         branch: next.branch,
@@ -228,7 +276,10 @@ export default function App() {
     projectRef.current = next
     setWorkspace((current) => ({ ...current, project: next, metadata: { ...current.metadata, updatedAt: Date.now() } }))
     dispatch({ type: 'project/set', project: next })
-  }, [])
+    // The bound folder is the real home of the project: the model's writes land
+    // on disk the moment they are applied, not only when a command runs.
+    void mirrorWrites(files)
+  }, [mirrorWrites])
 
   const runProjectChecks = useCallback(async (): Promise<ChecksResult> => {
     setRunningChecks(true)
@@ -395,11 +446,16 @@ export default function App() {
   const undoLastTurn = useCallback((message: ChatMessage) => {
     if (busyRef.current) return
     for (const snapshot of message.snapshots ?? []) {
-      if (snapshot.before === null) dispatch({ type: 'project/delete', path: snapshot.path })
-      else dispatch({ type: 'project/write', path: snapshot.path, content: snapshot.before })
+      if (snapshot.before === null) {
+        dispatch({ type: 'project/delete', path: snapshot.path })
+        void mirrorDelete(snapshot.path)
+      } else {
+        dispatch({ type: 'project/write', path: snapshot.path, content: snapshot.before })
+        void mirrorWrites([{ path: snapshot.path, content: snapshot.before }])
+      }
     }
     dispatch({ type: 'message/undo', id: message.id })
-  }, [])
+  }, [mirrorDelete, mirrorWrites])
 
   const setMode = useCallback((mode: AgentMode) => {
     modeRef.current = mode
@@ -416,16 +472,46 @@ export default function App() {
     setView('workspace')
   }, [workspaces, workspace.metadata.id])
 
-  const reset = useCallback(() => {
+  /**
+   * A new task starts empty and bound to a folder the user picks: everything
+   * the model writes lands there. Cancelling the pick keeps the current task.
+   */
+  const reset = useCallback(async () => {
     if (busyRef.current) return
-    if (!window.confirm('Start a new project? The chat and the generated files will be cleared.')) {
+    if (!window.confirm('Новая задача? Текущий чат останется в истории задач.')) {
       return
     }
+
+    let folder: string | null = null
+    let name = 'Новый проект'
+
+    if (isDesktop()) {
+      const picked = await pickProjectFolderPath()
+      if (!picked) return
+      folder = picked
+      name = picked.split(/[\\/]/).pop() || name
+    } else {
+      // The browser binds through a File System Access handle: same mirroring,
+      // but the permission lives only for this page session.
+      folderHandleRef.current = null
+      const picker = (window as unknown as { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker
+      if (picker) {
+        try {
+          const handle = (await picker()) as DirectoryHandle
+          folderHandleRef.current = handle
+          name = handle.name || name
+        } catch (error) {
+          if (error instanceof DOMException && error.name === 'AbortError') return
+          // A refused handle still allows a task — just without disk binding.
+        }
+      }
+    }
+
     const fresh = createInitialState()
     projectRef.current = fresh.project
     inspector.clear()
     setBaselineProject(fresh.project)
-    setWorkspace(createWorkspace(fresh.project, 'Новый проект', null))
+    setWorkspace(createWorkspace(emptyProject(), name, folder))
     dispatch({ type: 'app/reset' })
     setView('workspace')
     try {
@@ -469,6 +555,8 @@ export default function App() {
         name: string
         values: () => AsyncIterable<unknown>
       }
+      // The imported folder doubles as the write target for this session.
+      folderHandleRef.current = root as unknown as DirectoryHandle
       const imported: { path: string; content: string }[] = []
       const visit = async (directory: { name: string; values: () => AsyncIterable<unknown> }, prefix = ''): Promise<void> => {
         for await (const entry of directory.values()) {
@@ -507,7 +595,10 @@ export default function App() {
       dispatch({ type: 'terminal/append', line: { id: uid('term'), kind: 'input', text: `$ ${trimmed}` } })
       dispatch({ type: 'terminal/running', running: true })
 
-      const result = await execCommand(trimmed, projectRef.current.files, (event) => {
+      const result = await execCommand(
+        trimmed,
+        projectRef.current.files,
+        (event) => {
         if (event.type === 'stdout' || event.type === 'stderr') {
           dispatch({
             type: 'terminal/append',
@@ -534,7 +625,10 @@ export default function App() {
               : `exited with code ${event.code ?? 'unknown'}`,
           },
         })
-      })
+        },
+        undefined,
+        folderRef.current ?? undefined,
+      )
 
       if (!result.ok && result.error && result.error !== 'stopped') {
         dispatch({
@@ -674,8 +768,14 @@ export default function App() {
         terminalRunning={state.terminalRunning}
         onRunCommand={(command) => void runTerminalCommand(command)}
         onClearTerminal={() => dispatch({ type: 'terminal/clear' })}
-        onWriteFile={(path, content) => dispatch({ type: 'project/write', path, content })}
-        onDeleteFile={(path) => dispatch({ type: 'project/delete', path })}
+        onWriteFile={(path, content) => {
+          dispatch({ type: 'project/write', path, content })
+          void mirrorWrites([{ path, content }])
+        }}
+        onDeleteFile={(path) => {
+          dispatch({ type: 'project/delete', path })
+          void mirrorDelete(path)
+        }}
         onAskAgent={askAgentToFix}
         onOpenFile={openFile}
         focusFile={focusFile}

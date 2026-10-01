@@ -37,6 +37,19 @@ async fn read_project_files(path: String) -> Result<ImportedProject, String> {
 }
 
 #[tauri::command]
+async fn write_project_files(
+    root: String,
+    files: Vec<workspace_files::ProjectFileWrite>,
+) -> Result<usize, String> {
+    workspace_files::write_project_files(std::path::Path::new(&root), &files)
+}
+
+#[tauri::command]
+async fn delete_project_file(root: String, path: String) -> Result<bool, String> {
+    workspace_files::delete_project_file(std::path::Path::new(&root), &path)
+}
+
+#[tauri::command]
 async fn save_text_file(
     app: tauri::AppHandle,
     suggested_name: String,
@@ -92,6 +105,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             pick_project_folder,
             read_project_files,
+            write_project_files,
+            delete_project_file,
             save_text_file
         ])
         .build(tauri::generate_context!())

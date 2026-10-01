@@ -202,13 +202,15 @@ export async function execCommand(
   files: { path: string; content: string }[],
   onEvent: (event: ExecEvent) => void,
   signal?: AbortSignal,
+  /** The bound project folder: the command runs there instead of the scratch copy. */
+  cwd?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   let response: Response
   try {
     response = await fetch(apiUrl('/api/exec'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command, files }),
+      body: JSON.stringify({ command, files, cwd }),
       signal,
     })
   } catch (error) {

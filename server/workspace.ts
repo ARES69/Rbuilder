@@ -89,21 +89,30 @@ export function safeRelativePath(candidate: string): string | null {
   return value
 }
 
-/** Writes the project into the workspace and returns the directory to run in. */
+/** Writes the project into the scratch workspace and returns the directory to run in. */
 export async function materializeProject(root: string, files: CommandFile[]): Promise<string> {
   const projectDir = path.join(root, WORKSPACE_DIR, PROJECT_SUBDIR)
-  await mkdir(projectDir, { recursive: true })
+  return writeProjectInto(projectDir, files)
+}
+
+/**
+ * Writes `files` directly into `dir` — the folder the user bound to this
+ * project — and returns it. The bound folder is the real home of the project,
+ * so a terminal command sees exactly what the model wrote.
+ */
+export async function writeProjectInto(dir: string, files: CommandFile[]): Promise<string> {
+  await mkdir(dir, { recursive: true })
 
   for (const file of files) {
     const relative = safeRelativePath(file.path)
     if (!relative) continue
 
-    const target = path.join(projectDir, relative)
+    const target = path.join(dir, relative)
     await mkdir(path.dirname(target), { recursive: true })
     await writeFile(target, file.content, 'utf8')
   }
 
-  return projectDir
+  return dir
 }
 
 export function runCommand(
