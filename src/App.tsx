@@ -13,6 +13,8 @@ import {
   deleteViaDirectoryHandle,
   pickProjectFolder,
   pickProjectFolderPath,
+  readProjectFolder,
+  readViaDirectoryHandle,
   writeProjectFiles,
   writeViaDirectoryHandle,
   type DirectoryHandle,
@@ -462,15 +464,64 @@ export default function App() {
     dispatch({ type: 'mode/set', mode })
   }, [])
 
-  const switchWorkspace = useCallback((id: string) => {
-    const next = workspaces.find((entry) => entry.metadata.id === id)
-    if (!next || next.metadata.id === workspace.metadata.id) return
+  /** Swaps the open task, project first so every ref agrees. */
+  const applyWorkspace = useCallback((next: Workspace) => {
     projectRef.current = next.project
     setBaselineProject(next.baseline)
     setWorkspace(next)
     dispatch({ type: 'project/set', project: next.project })
     setView('workspace')
-  }, [workspaces, workspace.metadata.id])
+  }, [])
+
+  /**
+   * The bound folder is the real home of the project: switching to a task (or
+   * relaunching the app) reads it back, so files edited outside never diverge
+   * from what the agent sees. An empty folder keeps the virtual copy — wiping
+   * the disk behind the app's back should not delete work.
+   */
+  const refreshFromFolder = useCallback(async (target: Workspace): Promise<Workspace> => {
+    const folder = target.metadata.localPath
+    if (!folder) return target
+    try {
+      let source: ImportedFolder | null = null
+      if (isDesktop()) {
+        source = await readProjectFolder(folder)
+      } else {
+        const handle = folderHandleRef.current
+        const boundName = folder.split(/[\\/]/).pop()
+        // The handle belongs to one folder only; a mismatch would read the wrong tree.
+        if (handle && (!boundName || handle.name === boundName)) {
+          source = await readViaDirectoryHandle(handle)
+        }
+      }
+      if (!source || source.files.length === 0) return target
+      return { ...target, project: projectFromWorkspaceFiles(source.files) }
+    } catch (error) {
+      console.warn('Не удалось перечитать папку проекта:', error)
+      return target
+    }
+  }, [])
+
+  const switchWorkspace = useCallback((id: string) => {
+    const next = workspaces.find((entry) => entry.metadata.id === id)
+    if (!next || next.metadata.id === workspace.metadata.id) return
+    void refreshFromFolder(next).then(applyWorkspace)
+  }, [workspaces, workspace.metadata.id, refreshFromFolder, applyWorkspace])
+
+  // Launch: the open task's folder is read once, so a project edited outside
+  // the app starts in sync instead of resurrecting a stale virtual copy.
+  const startupRefreshed = useRef(false)
+  useEffect(() => {
+    if (startupRefreshed.current) return
+    startupRefreshed.current = true
+    if (workspace.metadata.localPath) {
+      void refreshFromFolder(workspace).then((refreshed) => {
+        if (refreshed !== workspace) applyWorkspace(refreshed)
+      })
+    }
+    // Deliberately once: against the workspace restored from storage.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /**
    * A new task starts empty and bound to a folder the user picks: everything
