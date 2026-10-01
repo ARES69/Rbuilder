@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { ChecksResult } from '../lib/checks'
 import { lineDiff, totalDiff } from '../lib/diff'
+import { fileGlyph, fileGlyphClass } from '../lib/fileIcons'
 import type { PreviewInspector } from '../lib/inspector'
 import type { Project } from '../lib/project'
 import type { PlanItem } from '../lib/protocol'
@@ -38,6 +39,9 @@ type Props = {
   onWriteFile: (path: string, content: string) => void
   onDeleteFile: (path: string) => void
   onAskAgent: (prompt: string) => void
+  /** Opens a changed file in the code column, landing on its diff. */
+  onOpenFile: (path: string) => void
+  focusFile: string | null
 }
 
 /**
@@ -101,8 +105,8 @@ export function InspectorPanel(props: Props) {
           <ul className="inspector-files">
             {fileDiffs.slice(0, 6).map((entry) => (
               <li key={entry.path}>
-                <button type="button" className="inspector-file" onClick={() => { onTabChange('code'); props.onDockTabChange('files') }}>
-                  <span className="inspector-file-icon" aria-hidden="true">{fileIcon(entry.path)}</span>
+                <button type="button" className="inspector-file" onClick={() => props.onOpenFile(entry.path)}>
+                  <span className={`inspector-file-icon file-glyph file-glyph--${fileGlyphClass(entry.path)}`} aria-hidden="true">{fileGlyph(entry.path)}</span>
                   <span className="inspector-file-path">{entry.path}</span>
                   <span className="inspector-file-diff">
                     <em className="inspector-add">+{entry.added}</em> <em className="inspector-del">−{entry.removed}</em>
@@ -210,7 +214,12 @@ export function InspectorPanel(props: Props) {
       ) : null}
       {tab === 'code' ? (
         <div className="inspector-full">
-          <CodeWorkbench project={project} onWriteFile={props.onWriteFile} />
+          <CodeWorkbench
+            project={project}
+            baseline={props.baselineProject}
+            onWriteFile={props.onWriteFile}
+            focusPath={props.focusFile}
+          />
         </div>
       ) : null}
     </aside>
@@ -225,28 +234,4 @@ function describeGoal(project: Project): string {
     if (title) return title
   }
   return 'Собрать приложение из текущего чата'
-}
-
-/** A tiny file-type glyph, in the spirit of ZCode's material icons. */
-function fileIcon(path: string): string {
-  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
-  switch (extension) {
-    case 'html':
-    case 'htm':
-      return '\u25C9'
-    case 'css':
-      return '\u25A0'
-    case 'js':
-    case 'mjs':
-      return '\u25CF'
-    case 'ts':
-    case 'tsx':
-      return '\u25B2'
-    case 'json':
-      return '\u25A6'
-    case 'md':
-      return '\u25AB'
-    default:
-      return '\u25AB'
-  }
 }

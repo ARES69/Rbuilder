@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { AttachmentChips } from './AttachmentChips'
 import { Markdown } from './Markdown'
 import { lineDiff, totalDiff } from '../lib/diff'
+import { fileGlyph, fileGlyphClass } from '../lib/fileIcons'
 import type { ChatMessage, ToolTraceEntry } from '../lib/store'
 
 type Props = {
@@ -124,7 +125,7 @@ function ChangesCard({
         {rows.map((row) => (
           <li key={row.path}>
             <button type="button" className="changes-file" onClick={() => onOpenFile?.(row.path)}>
-              <span className={`file-glyph file-glyph--${glyphClass(row.path)}`} aria-hidden="true">
+              <span className={`file-glyph file-glyph--${fileGlyphClass(row.path)}`} aria-hidden="true">
                 {fileGlyph(row.path)}
               </span>
               <span className="changes-path">{row.path}</span>
@@ -215,7 +216,7 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
                   <span className="run-verb">Обновил</span>
                   {rows.map((row) => (
                     <span key={row.path} className="run-inline-file">
-                      <span className={`file-glyph file-glyph--${glyphClass(row.path)}`} aria-hidden="true">
+                      <span className={`file-glyph file-glyph--${fileGlyphClass(row.path)}`} aria-hidden="true">
                         {fileGlyph(row.path)}
                       </span>
                       <code className="run-inline-name">{row.path}</code>
@@ -253,31 +254,4 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
       <div ref={endRef} />
     </div>
   )
-}
-
-/** A tiny file-type glyph, matching the inspector's icons. */
-function fileGlyph(path: string): string {
-  switch (glyphClass(path)) {
-    case 'html':
-      return '\u25C9'
-    case 'css':
-      return '\u25A0'
-    case 'js':
-      return '\u25CF'
-    case 'ts':
-      return '\u25B2'
-    case 'json':
-      return '\u25A6'
-    default:
-      return '\u25AB'
-  }
-}
-
-function glyphClass(path: string): string {
-  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
-  if (extension === 'htm') return 'html'
-  if (extension === 'mjs') return 'js'
-  if (extension === 'tsx') return 'ts'
-  if (['html', 'css', 'js', 'ts', 'json'].includes(extension)) return extension
-  return 'other'
 }
