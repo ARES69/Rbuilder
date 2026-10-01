@@ -205,7 +205,7 @@ const providerSchema = z.object({
 const chatRequestSchema = z.object({
   turns: z.array(turnSchema).min(1).max(MAX_TURNS),
   provider: providerSchema.optional(),
-  mode: z.enum(['plan', 'build']).default('build'),
+  mode: z.enum(['plan', 'ask', 'build']).default('build'),
   // The browser turns tools off for the final step of a nearly spent budget.
   tools: z.boolean().default(true),
   wrapUp: z.boolean().default(false),

@@ -51,6 +51,11 @@ export type TurnHooks = {
   onBudget?: (budget: Budget, wrappingUp: boolean) => void
   onMeta?: (config: { configured: boolean; model?: string }) => void
   onUnconfigured?: (message: string) => void
+  /**
+   * Ask mode: the user must approve each batch of writes before it lands.
+   * Resolves true to apply, false when rejected (the model is told).
+   */
+  requestApproval?: (files: ProjectFileInput[]) => Promise<boolean>
   execute: (call: ToolCall) => Promise<ToolOutcome>
 }
 
@@ -76,10 +81,14 @@ export async function runAgentTurn(
   signal?: AbortSignal,
 ): Promise<TurnResult> {
   const isPlan = input.mode === 'plan'
+  /** Ask mode holds writes the same way plan mode does, then gates on approval. */
+  const isAsk = input.mode === 'ask'
   const stepTurns = input.turns.slice()
   const files: string[] = []
   /** In plan mode files are held back rather than written. */
   const prepared: string[] = []
+  /** Ask mode holds the full writes (paths and content) until they are approved. */
+  const preparedFiles: ProjectFileInput[] = []
   let budget = createBudget(input.limits)
   let prose = ''
   let plan: PlanItem[] = []
@@ -128,6 +137,12 @@ export async function runAgentTurn(
             appliedCount = parsed.files.length
             if (isPlan) {
               for (const file of fresh) if (!prepared.includes(file.path)) prepared.push(file.path)
+            } else if (isAsk) {
+              for (const file of fresh) {
+                const existing = preparedFiles.findIndex((entry) => entry.path === file.path)
+                if (existing >= 0) preparedFiles[existing] = file
+                else preparedFiles.push(file)
+              }
             } else {
               for (const file of fresh) if (!files.includes(file.path)) files.push(file.path)
               hooks.onFiles(fresh)
@@ -170,6 +185,12 @@ export async function runAgentTurn(
       const fresh = final.files.slice(appliedCount)
       if (isPlan) {
         for (const file of fresh) if (!prepared.includes(file.path)) prepared.push(file.path)
+      } else if (isAsk) {
+        for (const file of fresh) {
+          const existing = preparedFiles.findIndex((entry) => entry.path === file.path)
+          if (existing >= 0) preparedFiles[existing] = file
+          else preparedFiles.push(file)
+        }
       } else {
         for (const file of fresh) if (!files.includes(file.path)) files.push(file.path)
         hooks.onFiles(fresh)
@@ -182,6 +203,28 @@ export async function runAgentTurn(
     prose = final.display || prose
     hooks.onReply(prose, files)
 
+    // Ask mode: the whole batch waits for the user before it lands. The gate
+    // sits before the exit checks so the final batch of a turn is asked too.
+    let rejectedPaths: string[] | null = null
+    if (isAsk && preparedFiles.length > 0) {
+      const batch = preparedFiles.splice(0, preparedFiles.length)
+      const approved = signal?.aborted
+        ? false
+        : await (hooks.requestApproval
+            ? hooks.requestApproval(batch)
+            : Promise.resolve(true))
+      if (approved) {
+        for (const file of batch) if (!files.includes(file.path)) files.push(file.path)
+        hooks.onFiles(batch)
+        hooks.onReply(prose, files)
+      } else if (signal?.aborted) {
+        stopped = true
+        break
+      } else {
+        rejectedPaths = batch.map((file) => file.path)
+      }
+    }
+
     if (stopped || !step.ok || calls.length === 0) break
 
     // Record what the model asked for, then answer each call.
@@ -190,6 +233,15 @@ export async function runAgentTurn(
       content: [final.display, renderPlan(plan)].filter(Boolean).join('\n\n'),
       toolCalls: calls,
     })
+
+    // A rejected batch reaches the model before its tool results do, so the
+    // next step adjusts instead of repeating the same writes.
+    if (rejectedPaths) {
+      stepTurns.push({
+        role: 'user',
+        content: `The user rejected the proposed changes to ${rejectedPaths.join(', ')}. Nothing was applied. Change your approach — do not rewrite the same thing; adjust or ask what to change.`,
+      })
+    }
 
     // Let React commit the rebuilt preview before a tool looks at the frame:
     // otherwise an inspection can read the document that is about to be replaced.

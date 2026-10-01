@@ -34,7 +34,7 @@ export type ChatTurn =
   | { role: 'assistant'; content: string; toolCalls: ToolCall[] }
   | { role: 'tool'; content: string; toolCallId: string; name: string }
 
-export type AgentMode = 'plan' | 'build'
+export type AgentMode = 'plan' | 'ask' | 'build'
 
 export type StreamEvent =
   | { type: 'meta'; configured: true; model: string }
@@ -190,6 +190,23 @@ const INTEGRATIONS = `The app can call external APIs — Bitrix24, amoCRM, Yande
 
 /** Builds the system prompt for the current mode. */
 export function buildSystemPrompt(mode: AgentMode): string {
+  if (mode === 'ask') {
+    return `${PROTOCOL}
+
+${TOOLS}
+
+${INTEGRATIONS}
+
+${PLAN_PROTOCOL}
+
+You are in ASK MODE: every batch of file blocks you emit is shown to the user for approval before it is applied.
+
+- Keep emitting complete file blocks exactly as usual; the interface collects them into one approval card.
+- The user either approves the batch (it is applied, and you continue) or rejects it (you are told in the next message).
+- When a batch is rejected, change your approach — do not repeat the same writes.
+- Work in small steps: propose one coherent batch, then verify it once it lands.`
+  }
+
   if (mode === 'plan') {
     return `${PROTOCOL}
 
