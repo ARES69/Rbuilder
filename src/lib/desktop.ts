@@ -9,6 +9,7 @@
  */
 
 import { isDesktop } from './apiBase'
+import { shouldIgnoreWorkspacePath } from './workspace'
 
 export type ImportedFile = { path: string; content: string }
 export type ImportedFolder = { name: string; files: ImportedFile[] }
@@ -45,6 +46,12 @@ export async function pickProjectFolder(): Promise<ImportedFolder | null> {
  */
 export async function pickProjectFolderPath(): Promise<string | null> {
   return invoke<string | null>('pick_project_folder')
+}
+
+/** Reads a bound folder from disk without a dialog (the desktop re-read). */
+export async function readProjectFolder(path: string): Promise<ImportedFolder> {
+  const payload = await invoke<{ name: string; files: ImportedFile[] }>('read_project_files', { path })
+  return { name: payload.name, files: payload.files }
 }
 
 /** Mirrors the files the model wrote into the bound project folder. */
@@ -109,6 +116,42 @@ export async function deleteViaDirectoryHandle(root: DirectoryHandle, path: stri
   if (!name) return
   const dir = await directoryFor(root, segments)
   await dir.removeEntry(name)
+}
+
+const MAX_IMPORT_FILES = 1500
+const MAX_IMPORT_FILE_CHARS = 600_000
+
+/**
+ * Reads a folder through a File System Access handle, with the same caps and
+ * skips as the Rust import walker — this is the browser's re-read path.
+ */
+export async function readViaDirectoryHandle(root: DirectoryHandle): Promise<ImportedFolder> {
+  const files: ImportedFile[] = []
+
+  const visit = async (dir: DirectoryHandle, prefix: string): Promise<void> => {
+    const iterator = (dir as DirectoryHandle & { values?: () => AsyncIterable<unknown> }).values
+    if (!iterator) return
+    for await (const entry of iterator.call(dir)) {
+      if (files.length >= MAX_IMPORT_FILES) return
+      const item = entry as {
+        kind?: 'file' | 'directory'
+        name: string
+        getFile?: () => Promise<{ text: () => Promise<string> }>
+      }
+      const relative = prefix ? `${prefix}/${item.name}` : item.name
+      if (shouldIgnoreWorkspacePath(relative)) continue
+      if (item.kind === 'directory') {
+        await visit(item as unknown as DirectoryHandle, relative)
+      } else if (item.kind === 'file' && item.getFile) {
+        const file = await item.getFile()
+        const content = await file.text()
+        if (content.length <= MAX_IMPORT_FILE_CHARS) files.push({ path: relative, content })
+      }
+    }
+  }
+
+  await visit(root, '')
+  return { name: root.name, files }
 }
 
 /**
