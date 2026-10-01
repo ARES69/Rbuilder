@@ -15,6 +15,7 @@ import {
   pickProjectFolderPath,
   readProjectFolder,
   readViaDirectoryHandle,
+  revealInExplorer,
   writeProjectFiles,
   writeViaDirectoryHandle,
   type DirectoryHandle,
@@ -432,6 +433,17 @@ export default function App() {
     setInspectorTab('code')
   }, [])
 
+  /** Opens the project folder in the system file explorer. */
+  const revealFolder = useCallback(async () => {
+    const folder = workspace.metadata.localPath
+    if (!folder) return
+    try {
+      await revealInExplorer(folder)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось открыть папку.')
+    }
+  }, [workspace.metadata.localPath])
+
   const approveFiles = useCallback(() => {
     approvalResolver.current?.(true)
     approvalResolver.current = null
@@ -582,7 +594,9 @@ export default function App() {
         if (folder && folder.files.length > 0) {
           const imported = projectFromWorkspaceFiles(folder.files)
           setBaselineProject(imported)
-          setWorkspace(createWorkspace(imported, folder.name, folder.name))
+          // The picked path (not the folder name) is what the mirror, the
+          // terminal and the explorer button bind to.
+          setWorkspace(createWorkspace(imported, folder.name, folder.path))
           applyFiles(imported.files)
         }
         setView('workspace')
@@ -626,7 +640,8 @@ export default function App() {
       if (imported.length > 0) {
         const importedProject = projectFromWorkspaceFiles(imported)
         setBaselineProject(importedProject)
-        setWorkspace(createWorkspace(importedProject, root.name, root.name))
+        // A browser handle has no real path; the session handle does the mirroring.
+        setWorkspace(createWorkspace(importedProject, root.name, null))
         applyFiles(importedProject.files)
       }
       setView('workspace')
@@ -751,12 +766,24 @@ export default function App() {
                   ? 'Сборка…'
                   : 'Готов'}
           </span>
-          <span className="zcode-chip" title="Папка проекта">
+          <span
+            className="zcode-chip"
+            title={workspace.metadata.localPath ?? 'Папка не привязана — создайте задачу с папкой'}
+          >
             <span aria-hidden="true">▣</span>
-            {workspace.metadata.localPath
-              ? workspace.metadata.localPath.split(/[\\/]/).pop()
-              : workspace.metadata.name}
+            {workspace.metadata.localPath ?? workspace.metadata.name}
           </span>
+          {workspace.metadata.localPath && isDesktop() ? (
+            <button
+              type="button"
+              className="zcode-chip-button"
+              onClick={() => void revealFolder()}
+              title="Открыть в проводнике"
+              aria-label="Открыть папку проекта в проводнике"
+            >
+              ↗
+            </button>
+          ) : null}
           {git?.branch ? (
             <span className="zcode-chip zcode-chip--branch" title="Ветка терминального воркспейса">
               <span aria-hidden="true">⑂</span>

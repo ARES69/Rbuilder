@@ -99,7 +99,12 @@ export function TaskRail({
       </div>
 
       <div className="rail-footer">
-        <div className="rail-project" onClick={onOpenWorkspace} role="presentation">
+        <div
+          className="rail-project"
+          title={workspaces.find((entry) => entry.metadata.id === activeId)?.metadata.localPath ?? undefined}
+          onClick={onOpenWorkspace}
+          role="presentation"
+        >
           <span className="rail-avatar" aria-hidden="true">R</span>
           <span className="rail-project-main">
             <strong>{workspaces.find((entry) => entry.metadata.id === activeId)?.metadata.name ?? 'Untitled'}</strong>

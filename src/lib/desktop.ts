@@ -12,7 +12,8 @@ import { isDesktop } from './apiBase'
 import { shouldIgnoreWorkspacePath } from './workspace'
 
 export type ImportedFile = { path: string; content: string }
-export type ImportedFolder = { name: string; files: ImportedFile[] }
+/** `path` is a real filesystem path on the desktop; a browser handle has none. */
+export type ImportedFolder = { name: string; path?: string; files: ImportedFile[] }
 
 type TauriBridge = {
   core?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> }
@@ -37,7 +38,7 @@ export async function pickProjectFolder(): Promise<ImportedFolder | null> {
   if (!path) return null
 
   const payload = await invoke<{ name: string; files: ImportedFile[] }>('read_project_files', { path })
-  return { name: payload.name, files: payload.files }
+  return { name: payload.name, path, files: payload.files }
 }
 
 /**
@@ -51,7 +52,12 @@ export async function pickProjectFolderPath(): Promise<string | null> {
 /** Reads a bound folder from disk without a dialog (the desktop re-read). */
 export async function readProjectFolder(path: string): Promise<ImportedFolder> {
   const payload = await invoke<{ name: string; files: ImportedFile[] }>('read_project_files', { path })
-  return { name: payload.name, files: payload.files }
+  return { name: payload.name, path, files: payload.files }
+}
+
+/** Opens the bound folder in the system file explorer. */
+export async function revealInExplorer(path: string): Promise<void> {
+  await invoke<void>('reveal_in_explorer', { path })
 }
 
 /** Mirrors the files the model wrote into the bound project folder. */
