@@ -133,6 +133,49 @@ describe('production server', () => {
     expect(stdout).toContain('rbuilder-terminal-ok')
     expect(events.at(-1)?.type).toBe('exit')
   })
+
+  it('runs a terminal command in the bound project folder', async () => {
+    const folder = path.join(fixture, 'my-project')
+    await mkdir(folder, { recursive: true })
+    const response = await fetch(`${base}/api/exec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        command: 'node -e "console.log(require(\'fs\').readFileSync(\'hello.txt\', \'utf8\').trim())"',
+        files: [{ path: 'hello.txt', content: 'bound-folder-ok' }],
+        cwd: folder,
+      }),
+    })
+    expect(response.status).toBe(200)
+    const events = (await response.text())
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { type: string; text?: string })
+    const stdout = events.filter((event) => event.type === 'stdout').map((event) => event.text).join('')
+    // The project files were synced into the bound folder before the command ran.
+    expect(stdout).toContain('bound-folder-ok')
+    expect(events.at(-1)?.type).toBe('exit')
+  })
+
+  it('refuses a bound folder that does not exist', async () => {
+    const response = await fetch(`${base}/api/exec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        command: 'echo hi',
+        files: [],
+        cwd: path.join(fixture, 'missing-folder'),
+      }),
+    })
+    expect(response.status).toBe(200)
+    const events = (await response.text())
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { type: string; message?: string })
+    expect(events[0]?.type).toBe('error')
+    expect(events[0]?.message).toContain('does not exist')
+    expect(events.at(-1)?.type).toBe('exit')
+  })
 })
 
 describe('terminal shells', () => {

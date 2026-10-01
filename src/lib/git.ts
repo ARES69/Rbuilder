@@ -131,6 +131,8 @@ export async function runGit(
   command: string,
   files: { path: string; content: string }[],
   signal?: AbortSignal,
+  /** The bound project folder: git answers for the real repository. */
+  cwd?: string,
 ): Promise<{ ok: boolean; output: string; error?: string }> {
   const parts: string[] = []
   let error: string | undefined
@@ -146,6 +148,7 @@ export async function runGit(
       }
     },
     signal,
+    cwd,
   )
 
   return { ok: result.ok && !error, output: parts.join(''), error: result.error ?? error }
@@ -154,8 +157,9 @@ export async function runGit(
 export async function readGitState(
   files: { path: string; content: string }[],
   signal?: AbortSignal,
+  cwd?: string,
 ): Promise<GitState> {
-  const result = await runGit(GIT_STATE_COMMAND, files, signal)
+  const result = await runGit(GIT_STATE_COMMAND, files, signal, cwd)
   const state = parseGitState(result.output)
   // A failed read still answers with what git managed to print; the panel shows
   // the error next to it rather than pretending the tree is clean.

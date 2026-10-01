@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { apiBase, apiUrl, isDesktop, serverLabel } from '../src/lib/apiBase'
-import { buildPreviewDocument, createStarterProject } from '../src/lib/project'
+import { buildPreviewDocument } from '../src/lib/project'
 
 /**
  * The desktop build serves the front end from its own scheme and the API from a
@@ -40,7 +40,12 @@ describe('api base', () => {
 })
 
 describe('preview injection', () => {
-  const project = createStarterProject()
+  const project = {
+    files: [
+      { path: 'index.html', content: '<!doctype html><html><body>hi</body></html>' },
+      { path: 'styles.css', content: 'body { margin: 0 }' },
+    ],
+  }
 
   it('tells the preview where the API is in the desktop build', () => {
     const document = buildPreviewDocument(project, {

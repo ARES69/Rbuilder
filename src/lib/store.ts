@@ -4,7 +4,7 @@
  * localStorage; terminal output and check results are session-only.
  */
 
-import { createStarterProject, upsertFiles, MAX_FILES, type Project, type ProjectFileInput } from './project'
+import { emptyProject, upsertFiles, MAX_FILES, type Project, type ProjectFileInput } from './project'
 import { truncateBytes, type AttachmentMeta } from './attachments'
 import { MAX_PERSISTED_TEXT_BYTES } from './attachments'
 import type { ChecksResult } from './checks'
@@ -95,7 +95,7 @@ export function uid(prefix: string): string {
 export function createInitialState(): AppState {
   return {
     messages: [],
-    project: createStarterProject(),
+    project: emptyProject(),
     configured: null,
     mode: 'build',
     plan: [],
@@ -325,12 +325,12 @@ export function loadState(): AppState {
     const project =
       parsed.project && Array.isArray(parsed.project.files)
         ? { files: parsed.project.files.filter(isFile) }
-        : createStarterProject()
+        : emptyProject()
 
     return {
       ...initial,
       messages,
-      project: project.files.length > 0 ? project : createStarterProject(),
+      project,
       mode: parsed.mode === 'plan' || parsed.mode === 'ask' ? parsed.mode : 'build',
       plan: Array.isArray(parsed.plan) ? parsed.plan.filter(isPlanItem) : [],
     }

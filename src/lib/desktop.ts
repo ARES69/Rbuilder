@@ -40,6 +40,78 @@ export async function pickProjectFolder(): Promise<ImportedFolder | null> {
 }
 
 /**
+ * Picks just the folder (no read-back): the bound directory a new project's
+ * files are written into. Returns null when the user cancels.
+ */
+export async function pickProjectFolderPath(): Promise<string | null> {
+  return invoke<string | null>('pick_project_folder')
+}
+
+/** Mirrors the files the model wrote into the bound project folder. */
+export async function writeProjectFiles(
+  root: string,
+  files: { path: string; content: string }[],
+): Promise<number> {
+  return invoke<number>('write_project_files', { root, files })
+}
+
+/** Removes one mirrored file; missing files count as removed. */
+export async function deleteProjectFile(root: string, path: string): Promise<boolean> {
+  return invoke<boolean>('delete_project_file', { root, path })
+}
+
+/* ------------------------------------------------------------------ */
+/* Browser fallback: File System Access handles                        */
+/* ------------------------------------------------------------------ */
+
+/** The slice of a directory handle the mirror needs. */
+export type DirectoryHandle = {
+  name: string
+  getDirectoryHandle: (name: string, options?: { create?: boolean }) => Promise<DirectoryHandle>
+  getFileHandle: (name: string, options?: { create?: boolean }) => Promise<WritableFileHandle>
+  removeEntry: (name: string, options?: { recursive?: boolean }) => Promise<void>
+}
+
+export type WritableFileHandle = {
+  createWritable: () => Promise<{
+    write: (data: string) => Promise<void>
+    close: () => Promise<void>
+  }>
+}
+
+async function directoryFor(root: DirectoryHandle, segments: string[]): Promise<DirectoryHandle> {
+  let handle = root
+  for (const segment of segments) handle = await handle.getDirectoryHandle(segment, { create: true })
+  return handle
+}
+
+/** Writes files through a File System Access handle (the browser build). */
+export async function writeViaDirectoryHandle(
+  root: DirectoryHandle,
+  files: { path: string; content: string }[],
+): Promise<void> {
+  for (const file of files) {
+    const segments = file.path.split('/')
+    const name = segments.pop()
+    if (!name) continue
+    const dir = await directoryFor(root, segments)
+    const fileHandle = await dir.getFileHandle(name, { create: true })
+    const writable = await fileHandle.createWritable()
+    await writable.write(file.content)
+    await writable.close()
+  }
+}
+
+/** Removes one file through a File System Access handle; missing is fine. */
+export async function deleteViaDirectoryHandle(root: DirectoryHandle, path: string): Promise<void> {
+  const segments = path.split('/')
+  const name = segments.pop()
+  if (!name) return
+  const dir = await directoryFor(root, segments)
+  await dir.removeEntry(name)
+}
+
+/**
  * Saves text through the shell's save dialog. In the browser this falls back to a
  * download, so the button works in both builds.
  */
