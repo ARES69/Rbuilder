@@ -1,4 +1,5 @@
 import type { ChecksResult } from '../lib/checks'
+import { relativeTime } from '../lib/time'
 import type { Workspace } from '../lib/workspace'
 
 /** What the rail reports about the terminal workspace, straight from git. */
@@ -8,7 +9,6 @@ type Props = {
   workspaces: Workspace[]
   activeId: string
   busy: boolean
-  mode: 'plan' | 'build'
   git: GitSummary | null
   checks: ChecksResult | null
   theme: 'dark' | 'light'
@@ -22,27 +22,23 @@ type Props = {
   onOpenProjects: () => void
 }
 
-/** One grouped task entry: icon, clipped title, age. */
+/** One task row: active dot, clipped title, age on the right. */
 function RailItem({
   name,
-  meta,
+  age,
   active,
   onClick,
 }: {
   name: string
-  meta: string
+  age: string
   active: boolean
   onClick: () => void
 }) {
   return (
     <button type="button" className={`rail-item${active ? ' rail-item--active' : ''}`} onClick={onClick} title={name}>
-      <span className="rail-item-icon" aria-hidden="true">
-        □
-      </span>
-      <span className="rail-item-main">
-        <span className="rail-item-name">{name}</span>
-        <span className="rail-item-meta">{meta}</span>
-      </span>
+      <span className="rail-item-dot" aria-hidden="true" />
+      <span className="rail-item-name">{name}</span>
+      <span className="rail-item-time">{age}</span>
     </button>
   )
 }
@@ -51,7 +47,6 @@ export function TaskRail({
   workspaces,
   activeId,
   busy,
-  mode,
   git,
   checks,
   theme,
@@ -95,7 +90,7 @@ export function TaskRail({
             <RailItem
               key={entry.metadata.id}
               name={entry.metadata.name}
-              meta={mode === 'build' ? 'build' : 'plan'}
+              age={relativeTime(entry.metadata.updatedAt)}
               active={entry.metadata.id === activeId}
               onClick={() => onSelect(entry.metadata.id)}
             />

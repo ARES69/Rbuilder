@@ -113,8 +113,11 @@ export function Composer({
             </div>
             <button
               type="button"
-              className="button button--quiet"
-              onClick={() => fileRef.current?.click()}>Прикрепить файлы</button>
+              className="attach-button"
+              onClick={() => fileRef.current?.click()}
+              title="Прикрепить файлы"
+              aria-label="Прикрепить файлы"
+            >+</button>
             <input
               ref={fileRef}
               type="file"
