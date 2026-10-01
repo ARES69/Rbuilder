@@ -36,6 +36,24 @@ async fn read_project_files(path: String) -> Result<ImportedProject, String> {
     workspace_files::collect_project_files(std::path::Path::new(&path))
 }
 
+/// Opens the project folder in the system file explorer.
+#[tauri::command]
+async fn reveal_in_explorer(path: String) -> Result<(), String> {
+    let dir = std::path::PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Err(format!("{} is not a directory", path));
+    }
+
+    let result = if cfg!(target_os = "windows") {
+        std::process::Command::new("explorer").arg(&dir).spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(&dir).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&dir).spawn()
+    };
+    result.map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn write_project_files(
     root: String,
@@ -107,6 +125,7 @@ pub fn run() {
             read_project_files,
             write_project_files,
             delete_project_file,
+            reveal_in_explorer,
             save_text_file
         ])
         .build(tauri::generate_context!())

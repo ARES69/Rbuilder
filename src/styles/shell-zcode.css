@@ -320,6 +320,29 @@
   font-size: 11px;
 }
 
+/* «Открыть в проводнике» next to the folder chip. */
+.zcode-chip-button {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.zcode-chip-button:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
 .zcode-chat-head-end {
   display: flex;
   align-items: center;
