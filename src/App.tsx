@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { InspectorPanel, type InspectorTab } from './components/InspectorPanel'
+import type { Approval } from './components/ApprovalPanel'
 import { ChatPanel } from './components/ChatPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { BrowserSessionPanel } from './components/BrowserSessionPanel'
@@ -20,6 +21,7 @@ import {
   projectFilePaths,
   upsertFiles,
   type Project,
+  type ProjectFileInput,
 } from './lib/project'
 import { RUNTIME_SCRIPT } from './lib/previewRuntime'
 import {
@@ -63,6 +65,9 @@ export default function App() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('inspector')
   /** A changed file asked for by the transcript or the inspector. */
   const [focusFile, setFocusFile] = useState<string | null>(null)
+  /** Ask mode: the batch of writes currently waiting for (or declined by) the user. */
+  const [approval, setApproval] = useState<Approval | null>(null)
+  const approvalResolver = useRef<((ok: boolean) => void) | null>(null)
   /** Real model lists fetched from local providers, keyed by profile id. */
   const [modelLists, setModelLists] = useState<Record<string, string[]>>({})
   const [importing, setImporting] = useState(false)
@@ -277,9 +282,22 @@ export default function App() {
       busyRef.current = true
       setBusy(true)
       setBudget(null)
+      setApproval(null)
 
       const controller = new AbortController()
       abortRef.current = controller
+
+      // An aborted turn must not wait forever on a pending approval card.
+      controller.signal.addEventListener('abort', () => {
+        approvalResolver.current?.(false)
+        approvalResolver.current = null
+      })
+
+      const requestApproval = (files: ProjectFileInput[]) =>
+        new Promise<boolean>((resolve) => {
+          approvalResolver.current = resolve
+          setApproval({ id: uid('appr'), files: files.map((file) => ({ ...file })), status: 'pending' })
+        })
 
       let written: string[] = []
       /** Pre-turn content of every path this turn touches: diff rows and Undo. */
@@ -320,9 +338,13 @@ export default function App() {
           },
           execute: (call) =>
             executeTool(call, { inspector, project: projectRef.current }),
+          requestApproval,
         },
         controller.signal,
       )
+
+      // A turn that ended while a card was still pending (abort) leaves nothing clickable.
+      setApproval((current) => (current?.status === 'pending' ? null : current))
 
       const content = pickReplyText({
         prose: result.prose,
@@ -355,6 +377,18 @@ export default function App() {
   const openFile = useCallback((path: string) => {
     setFocusFile(path)
     setInspectorTab('code')
+  }, [])
+
+  const approveFiles = useCallback(() => {
+    approvalResolver.current?.(true)
+    approvalResolver.current = null
+    setApproval(null)
+  }, [])
+
+  const rejectFiles = useCallback(() => {
+    approvalResolver.current?.(false)
+    approvalResolver.current = null
+    setApproval((current) => (current ? { ...current, status: 'rejected' } : current))
   }, [])
 
   /** Reverts the newest turn's writes to their pre-turn content. */
@@ -561,7 +595,17 @@ export default function App() {
       <section className="zcode-chat" aria-label="Чат с агентом">
         <header className="zcode-chat-head">
           <h1 className="zcode-chat-title">{workspace.metadata.name}</h1>
-          <span className="zcode-chat-badge">{state.mode === 'plan' ? 'План' : busy ? 'Сборка…' : 'Готов'}</span>
+          <span className="zcode-chat-badge">
+            {state.mode === 'plan'
+              ? 'План'
+              : state.mode === 'ask'
+                ? busy
+                  ? 'Ожидает подтверждения…'
+                  : 'Подтверждения'
+                : busy
+                  ? 'Сборка…'
+                  : 'Готов'}
+          </span>
           <span className="zcode-chip" title="Папка проекта">
             <span aria-hidden="true">▣</span>
             {workspace.metadata.localPath
@@ -591,6 +635,9 @@ export default function App() {
           onSend={send}
           onStop={stop}
           onOpenSettings={() => setSettingsOpen(true)}
+          approval={approval}
+          onApproveFiles={approveFiles}
+          onRejectFiles={rejectFiles}
           files={state.project.files}
           onOpenFile={openFile}
           onUndo={undoLastTurn}

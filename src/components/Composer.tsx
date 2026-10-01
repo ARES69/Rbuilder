@@ -107,6 +107,11 @@ export function Composer({
                 title="Сразу писать код">Создать</button>
               <button
                 type="button"
+                className={`segment${mode === 'ask' ? ' segment--active' : ''}`}
+                onClick={() => onModeChange('ask')}
+                title="Показывать правки на подтверждение перед записью">Спрашивать</button>
+              <button
+                type="button"
                 className={`segment${mode === 'plan' ? ' segment--active' : ''}`}
                 onClick={() => onModeChange('plan')}
                 title="Сначала согласовать план, не изменяя код">План</button>
@@ -151,7 +156,9 @@ export function Composer({
                   ? 'Читаю файлы…'
                   : mode === 'plan'
                     ? 'Режим плана · код не изменяется до подтверждения'
-                    : 'Любой тип файла · перетащите его на панель'}
+                    : mode === 'ask'
+                      ? 'Правки применяются только после вашего подтверждения'
+                      : 'Любой тип файла · перетащите его на панель'}
               </span>
             )}
           </div>

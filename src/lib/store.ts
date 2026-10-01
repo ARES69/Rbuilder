@@ -331,7 +331,7 @@ export function loadState(): AppState {
       ...initial,
       messages,
       project: project.files.length > 0 ? project : createStarterProject(),
-      mode: parsed.mode === 'plan' ? 'plan' : 'build',
+      mode: parsed.mode === 'plan' || parsed.mode === 'ask' ? parsed.mode : 'build',
       plan: Array.isArray(parsed.plan) ? parsed.plan.filter(isPlanItem) : [],
     }
   } catch {

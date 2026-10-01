@@ -200,3 +200,83 @@ describe('agent turn', () => {
     expect(rec.started).toHaveLength(0)
   })
 })
+
+describe('ask mode', () => {
+  const proposal = (text: string, tool?: boolean): Event[] => [
+    { type: 'delta', delta: `${text}\n\n\`\`\`file:index.html\n<h1>v2</h1>\n\`\`\`\n` },
+    ...(tool ? [{ type: 'tool_call', id: 'c1', name: 'inspect_preview', arguments: '{}' }] : []),
+  ]
+
+  it('applies a batch only after approval', async () => {
+    installProvider(() => proposal('Making the banner.'))
+    const applied: string[] = []
+    let asked = 0
+
+    const result = await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...recorder().hooks,
+      onFiles: (written) => applied.push(...written.map((file) => file.path)),
+      requestApproval: async (files) => {
+        asked += 1
+        expect(files.map((file) => file.path)).toEqual(['index.html'])
+        return true
+      },
+    })
+
+    expect(asked).toBe(1)
+    expect(applied).toEqual(['index.html'])
+    expect(result.files).toEqual(['index.html'])
+  })
+
+  it('tells the model when a batch is rejected and applies nothing', async () => {
+    const bodies = installProvider((step) => (step === 1 ? proposal('Proposal.', true) : [{ type: 'delta', delta: 'Adjusted.' }]))
+    const rec = recorder()
+    const applied: string[] = []
+    let decisions = 0
+
+    const result = await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      onFiles: (written) => applied.push(...written.map((file) => file.path)),
+      requestApproval: async () => {
+        decisions += 1
+        return decisions !== 1
+      },
+    })
+
+    expect(decisions).toBe(1)
+    expect(applied).toEqual([])
+    expect(result.files).toEqual([])
+    // The next provider call must carry the rejection, before the tool results.
+    const turns = bodies[1]!.turns
+    const rejectNote = turns.findIndex((turn) => turn.role === 'user' && turn.content.includes('rejected'))
+    const toolResult = turns.findIndex((turn) => turn.role === 'tool')
+    const assistant = turns.findIndex((turn) => turn.role === 'assistant' && 'toolCalls' in turn && turn.toolCalls.length > 0)
+    expect(assistant).toBeGreaterThan(-1)
+    expect(rejectNote).toBeGreaterThan(assistant)
+    expect(toolResult).toBeGreaterThan(rejectNote)
+    expect(rec.started).toEqual(['inspect_preview'])
+  })
+
+  it('replaces an earlier proposal of the same file instead of stacking copies', async () => {
+    installProvider((step) =>
+      step === 1
+        ? [
+            { type: 'delta', delta: '```file:index.html\n<h1>one</h1>\n```\n' },
+            { type: 'tool_call', id: 'c1', name: 'inspect_preview', arguments: '{}' },
+          ]
+        : [{ type: 'delta', delta: '```file:index.html\n<h1>two</h1>\n```' }],
+    )
+    const approved: string[] = []
+    const rec = recorder()
+
+    await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      requestApproval: async (files) => {
+        approved.push(files.map((file) => `${file.path}:${file.content}`)[0] ?? '')
+        return false
+      },
+    })
+
+    // Two gates, one per step; each carries the fresh content of that step.
+    expect(approved).toEqual(['index.html:<h1>one</h1>', 'index.html:<h1>two</h1>'])
+  })
+})
