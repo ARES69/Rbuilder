@@ -19,6 +19,10 @@ type Props = {
   onSend: (text: string, attachments: AttachmentMeta[]) => void
   onStop: () => void
   onOpenSettings: () => void
+  /** Current project files + transcript actions (diff rows, undo). */
+  files: { path: string; content: string }[]
+  onOpenFile: (path: string) => void
+  onUndo: (message: ChatMessage) => void
   /** Provider + model shown in the composer, switchable in place. */
   providerName: string
   model: string | null
@@ -46,6 +50,9 @@ export function ChatPanel({
   onSend,
   onStop,
   onOpenSettings,
+  files,
+  onOpenFile,
+  onUndo,
   providerName,
   model,
   models,
@@ -130,7 +137,14 @@ export function ChatPanel({
         </span>
       </header>
 
-      <MessageList messages={messages} examples={EXAMPLES} onExample={setDraft} />
+      <MessageList
+        messages={messages}
+        examples={EXAMPLES}
+        onExample={setDraft}
+        files={files}
+        onOpenFile={onOpenFile}
+        onUndo={onUndo}
+      />
 
       <PlanPanel plan={plan} mode={mode} busy={busy} onApprove={onApprovePlan} />
 

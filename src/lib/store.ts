@@ -24,6 +24,9 @@ export type ToolTraceEntry = {
   output?: string
 }
 
+/** What a file looked like before one assistant turn touched it. */
+export type TurnSnapshot = { path: string; before: string | null }
+
 export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
@@ -31,6 +34,10 @@ export type ChatMessage = {
   attachments?: AttachmentMeta[]
   /** Paths written by this assistant turn. */
   files?: string[]
+  /** Pre-turn content of those paths, so the transcript can diff and undo. */
+  snapshots?: TurnSnapshot[]
+  /** Set once the user reverted this turn's writes. */
+  undone?: boolean
   /** Tool calls made while producing this turn. */
   tools?: ToolTraceEntry[]
   status?: MessageStatus
@@ -59,7 +66,8 @@ export type Action =
   | { type: 'user/send'; message: ChatMessage }
   | { type: 'assistant/start'; id: string }
   | { type: 'assistant/set'; id: string; content: string; files?: string[] }
-  | { type: 'assistant/finish'; id: string; status: MessageStatus; content?: string; files?: string[] }
+  | { type: 'assistant/finish'; id: string; status: MessageStatus; content?: string; files?: string[]; snapshots?: TurnSnapshot[] }
+  | { type: 'message/undo'; id: string }
   | { type: 'tool/start'; messageId: string; call: ToolCall; detail: string }
   | { type: 'tool/end'; messageId: string; call: ToolCall; outcome: ToolOutcome }
   | { type: 'plan/set'; items: PlanItem[] }
@@ -138,8 +146,17 @@ export function reducer(state: AppState, action: Action): AppState {
                 status: action.status,
                 content: action.content ?? message.content,
                 files: action.files ?? message.files,
+                snapshots: action.snapshots ?? message.snapshots,
               }
             : message,
+        ),
+      }
+
+    case 'message/undo':
+      return {
+        ...state,
+        messages: state.messages.map((message) =>
+          message.id === action.id ? { ...message, undone: true } : message,
         ),
       }
 

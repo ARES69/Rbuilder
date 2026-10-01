@@ -278,6 +278,8 @@ export default function App() {
       abortRef.current = controller
 
       let written: string[] = []
+      /** Pre-turn content of every path this turn touches: diff rows and Undo. */
+      const beforeImages = new Map<string, string | null>()
       const mode: AgentMode = modeOverride ?? modeRef.current
 
       const result = await runAgentTurn(
@@ -287,7 +289,15 @@ export default function App() {
             written = files
             dispatch({ type: 'assistant/set', id: assistantId, content: prose, files: [...files] })
           },
-          onFiles: applyFiles,
+          onFiles: (files) => {
+            for (const file of files) {
+              if (!beforeImages.has(file.path)) {
+                const existing = projectRef.current.files.find((entry) => entry.path === file.path)
+                beforeImages.set(file.path, existing ? existing.content : null)
+              }
+            }
+            applyFiles(files)
+          },
           onPlan: (items) => dispatch({ type: 'plan/set', items }),
           onBudget: (live, wrappingUp) => setBudget({ budget: live, wrappingUp }),
           onMeta: (config) => {
@@ -324,6 +334,7 @@ export default function App() {
         status: result.ok || result.stopped ? 'done' : 'error',
         content,
         files: written,
+        snapshots: [...beforeImages].map(([path, before]) => ({ path, before })),
       })
 
       busyRef.current = false
@@ -335,6 +346,16 @@ export default function App() {
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
+
+  /** Reverts the newest turn's writes to their pre-turn content. */
+  const undoLastTurn = useCallback((message: ChatMessage) => {
+    if (busyRef.current) return
+    for (const snapshot of message.snapshots ?? []) {
+      if (snapshot.before === null) dispatch({ type: 'project/delete', path: snapshot.path })
+      else dispatch({ type: 'project/write', path: snapshot.path, content: snapshot.before })
+    }
+    dispatch({ type: 'message/undo', id: message.id })
+  }, [])
 
   const setMode = useCallback((mode: AgentMode) => {
     modeRef.current = mode
@@ -514,7 +535,6 @@ export default function App() {
         workspaces={workspaces.length > 0 ? workspaces : [workspace]}
         activeId={workspace.metadata.id}
         busy={busy}
-        mode={state.mode}
         git={git}
         checks={state.checks}
         theme={theme}
@@ -532,6 +552,18 @@ export default function App() {
         <header className="zcode-chat-head">
           <h1 className="zcode-chat-title">{workspace.metadata.name}</h1>
           <span className="zcode-chat-badge">{state.mode === 'plan' ? 'План' : busy ? 'Сборка…' : 'Готов'}</span>
+          <span className="zcode-chip" title="Папка проекта">
+            <span aria-hidden="true">▣</span>
+            {workspace.metadata.localPath
+              ? workspace.metadata.localPath.split(/[\\/]/).pop()
+              : workspace.metadata.name}
+          </span>
+          {git?.branch ? (
+            <span className="zcode-chip zcode-chip--branch" title="Ветка терминального воркспейса">
+              <span aria-hidden="true">⑂</span>
+              {git.branch}
+            </span>
+          ) : null}
           <div className="zcode-chat-head-end">
             {state.configured && state.model ? <span className="topbar-model">{state.model}</span> : null}
           </div>
@@ -549,6 +581,12 @@ export default function App() {
           onSend={send}
           onStop={stop}
           onOpenSettings={() => setSettingsOpen(true)}
+          files={state.project.files}
+          onOpenFile={() => {
+            setInspectorTab('code')
+            setDockTab('files')
+          }}
+          onUndo={undoLastTurn}
           providerName={activeProvider.name}
           model={state.model ?? activeProvider.model}
           models={composerModels}
@@ -574,6 +612,7 @@ export default function App() {
         dockTab={dockTab}
         onDockTabChange={setDockTab}
         checks={state.checks}
+        plan={state.plan}
         runningChecks={runningChecks}
         git={git}
         onRunChecks={() => void runProjectChecks()}

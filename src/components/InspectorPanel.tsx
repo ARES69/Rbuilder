@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
 import type { ChecksResult } from '../lib/checks'
+import { lineDiff, totalDiff } from '../lib/diff'
 import type { PreviewInspector } from '../lib/inspector'
 import type { Project } from '../lib/project'
+import type { PlanItem } from '../lib/protocol'
 import type { TerminalLine } from '../lib/store'
 import { CodeWorkbench } from './CodeWorkbench'
 import { PreviewPane } from './PreviewPane'
@@ -24,6 +26,8 @@ type Props = {
   dockTab: 'files' | 'git' | 'console' | 'checks' | 'terminal'
   onDockTabChange: (tab: 'files' | 'git' | 'console' | 'checks' | 'terminal') => void
   checks: ChecksResult | null
+  /** The agent's live checklist, when a turn produced one. */
+  plan: PlanItem[]
   runningChecks: boolean
   git: GitSummary | null
   onRunChecks: () => void
@@ -54,22 +58,28 @@ export function InspectorPanel(props: Props) {
   )
 
   /** Per-file +N -N, the way the Git tools card shows them. */
-  const lineDiff = useMemo(
+  const fileDiffs = useMemo(
     () =>
       changed.map((file) => {
         const baseline = baselineProject.files.find((entry) => entry.path === file.path)
-        const before = baseline ? baseline.content.split('\n') : []
-        const after = file.content.split('\n')
-        const beforeSet = new Set(before)
-        const afterSet = new Set(after)
-        const added = after.filter((line) => line.trim() && !beforeSet.has(line)).length
-        const removed = before.filter((line) => line.trim() && !afterSet.has(line)).length
-        return { path: file.path, added, removed, isNew: !baseline }
+        const diff = lineDiff(baseline ? baseline.content : null, file.content)
+        return { path: file.path, added: diff.added, removed: diff.removed, isNew: !baseline }
       }),
     [changed, baselineProject.files],
   )
-  const addedCount = lineDiff.reduce((sum, entry) => sum + entry.added, 0)
-  const removedCount = lineDiff.reduce((sum, entry) => sum + entry.removed, 0)
+  const totals = totalDiff(fileDiffs)
+
+  const steps = useMemo(() => {
+    if (props.plan.length > 0) return props.plan.map((item) => ({ text: item.text, done: item.done }))
+    // No checklist yet: show the shape of the work instead of nothing.
+    return [
+      { text: 'Создать структуру проекта', done: changed.length > 0 },
+      { text: 'Написать код приложения', done: project.files.length > 1 },
+      { text: 'Проверить и исправить', done: false },
+    ]
+  }, [props.plan, changed.length, project.files.length])
+  const doneCount = steps.filter((step) => step.done).length
+  const complete = props.plan.length > 0 && doneCount === props.plan.length
 
   const inspectorCard = (
     <div className="inspector-card">
@@ -84,18 +94,18 @@ export function InspectorPanel(props: Props) {
             <small>{changed.length === 0 ? 'нет изменений' : `${changed.length} файлов`}</small>
           </span>
           <span className="inspector-diff">
-            <em className="inspector-add">+{addedCount}</em> <em className="inspector-del">-{removedCount}</em>
+            <em className="inspector-add">+{totals.added}</em> <em className="inspector-del">−{totals.removed}</em>
           </span>
         </button>
-        {lineDiff.length > 0 ? (
+        {fileDiffs.length > 0 ? (
           <ul className="inspector-files">
-            {lineDiff.slice(0, 6).map((entry) => (
+            {fileDiffs.slice(0, 6).map((entry) => (
               <li key={entry.path}>
                 <button type="button" className="inspector-file" onClick={() => { onTabChange('code'); props.onDockTabChange('files') }}>
                   <span className="inspector-file-icon" aria-hidden="true">{fileIcon(entry.path)}</span>
                   <span className="inspector-file-path">{entry.path}</span>
                   <span className="inspector-file-diff">
-                    <em className="inspector-add">+{entry.added}</em> <em className="inspector-del">-{entry.removed}</em>
+                    <em className="inspector-add">+{entry.added}</em> <em className="inspector-del">−{entry.removed}</em>
                   </span>
                 </button>
               </li>
@@ -124,6 +134,7 @@ export function InspectorPanel(props: Props) {
       <section className="inspector-block">
         <header className="inspector-block-head">
           <h3>Goal</h3>
+          {complete ? <span className="inspector-badge">Complete</span> : null}
         </header>
         <div className="inspector-goal">
           <span className="inspector-goal-icon" aria-hidden="true">◎</span>
@@ -131,12 +142,18 @@ export function InspectorPanel(props: Props) {
         </div>
         <div className="inspector-progress">
           <span className="inspector-progress-label">Progress</span>
-          <span className="inspector-progress-value">{changed.length > 0 ? `${changed.length} файлов изменено` : 'ожидание первой задачи'}</span>
+          <span className="inspector-progress-value">
+            {props.plan.length > 0
+              ? `${doneCount}/${steps.length}${changed.length > 0 ? ` · ${changed.length} файлов` : ''}`
+              : changed.length > 0
+                ? `${changed.length} файлов изменено`
+                : 'ожидание первой задачи'}
+          </span>
         </div>
         <ul className="inspector-steps">
-          <li className={changed.length > 0 ? 'done' : ''}>Создать структуру проекта</li>
-          <li className={project.files.length > 1 ? 'done' : ''}>Написать код приложения</li>
-          <li>Проверить и исправить</li>
+          {steps.map((step, index) => (
+            <li key={`${index}-${step.text}`} className={step.done ? 'done' : ''}>{step.text}</li>
+          ))}
         </ul>
       </section>
 
