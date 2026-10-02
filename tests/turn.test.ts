@@ -280,3 +280,118 @@ describe('ask mode', () => {
     expect(approved).toEqual(['index.html:<h1>one</h1>', 'index.html:<h1>two</h1>'])
   })
 })
+
+describe('ask mode: commands', () => {
+  const commandStep = (id: string): Event[] => [
+    { type: 'delta', delta: 'Checking the file.' },
+    { type: 'tool_call', id, name: 'run_command', arguments: JSON.stringify({ command: 'node --check app.js' }) },
+  ]
+
+  it('runs an approved command and hands its result to the model', async () => {
+    installProvider((step) => (step === 1 ? commandStep('c1') : [{ type: 'delta', delta: 'It is fine.' }]))
+    const rec = recorder()
+    const asked: string[] = []
+    const executed: string[] = []
+
+    await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      execute: async (call) => {
+        executed.push(call.name)
+        return { ok: true, summary: 'node --check app.js', text: 'Exited with code 0.' }
+      },
+      requestCommandApproval: async (command) => {
+        asked.push(command)
+        return true
+      },
+    })
+
+    expect(asked).toEqual(['node --check app.js'])
+    expect(executed).toEqual(['run_command'])
+    expect(rec.started).toEqual(['run_command'])
+  })
+
+  it('asks before every command even when the previous one was allowed', async () => {
+    installProvider((step) => (step === 1 ? commandStep('c1') : step === 2 ? commandStep('c2') : [{ type: 'delta', delta: 'Done.' }]))
+    const rec = recorder()
+    const asked: string[] = []
+    let executed = 0
+
+    await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      execute: async () => {
+        executed += 1
+        return { ok: true, summary: 'ls', text: 'index.html' }
+      },
+      requestCommandApproval: async (command) => {
+        asked.push(command)
+        return true
+      },
+    })
+
+    expect(asked).toEqual(['node --check app.js', 'node --check app.js'])
+    expect(executed).toBe(2)
+  })
+
+  it('declines a rejected command without executing it and tells the model', async () => {
+    const bodies = installProvider((step) => (step === 1 ? commandStep('c1') : [{ type: 'delta', delta: 'Understood.' }]))
+    const rec = recorder()
+    let executed = 0
+
+    await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      execute: async () => {
+        executed += 1
+        return { ok: true, summary: 'never', text: 'must not run' }
+      },
+      requestCommandApproval: async () => false,
+    })
+
+    expect(executed).toBe(0)
+    expect(rec.started).toEqual(['run_command'])
+    // The rejection travels as the tool result of the same call.
+    const toolResult = bodies[1]!.turns.find(
+      (turn) => turn.role === 'tool' && 'toolCallId' in turn && turn.toolCallId === 'c1',
+    )
+    expect(toolResult?.content).toContain('declined')
+  })
+
+  it('leaves non-command tools ungated in ask mode', async () => {
+    installProvider((step) =>
+      step === 1
+        ? [
+            { type: 'delta', delta: 'Looking.' },
+            { type: 'tool_call', id: 'c1', name: 'inspect_preview', arguments: '{}' },
+          ]
+        : [{ type: 'delta', delta: 'Seen.' }],
+    )
+    const rec = recorder()
+    let asked = 0
+
+    await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      requestCommandApproval: async () => {
+        asked += 1
+        return false
+      },
+    })
+
+    expect(asked).toBe(0)
+    expect(rec.started).toEqual(['inspect_preview'])
+  })
+
+  it('defaults to decline when no command hook is provided', async () => {
+    installProvider((step) => (step === 1 ? commandStep('c1') : [{ type: 'delta', delta: 'Ok.' }]))
+    const rec = recorder()
+    let executed = 0
+
+    await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      execute: async () => {
+        executed += 1
+        return { ok: true, summary: 'never', text: 'must not run' }
+      },
+    })
+
+    expect(executed).toBe(0)
+  })
+})

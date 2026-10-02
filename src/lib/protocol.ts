@@ -54,12 +54,14 @@ export type ToolName =
   | 'interact_with_preview'
   | 'read_project_file'
   | 'run_checks'
+  | 'run_command'
 
 export const TOOL_LABELS: Record<string, string> = {
   inspect_preview: 'Inspected the preview',
   interact_with_preview: 'Used the preview',
   read_project_file: 'Read a project file',
   run_checks: 'Ran the project checks',
+  run_command: 'Ran a command',
 }
 
 /** OpenAI-style function definitions, shared by the proxy and the UI. */
@@ -128,6 +130,22 @@ export const TOOL_DEFINITIONS = [
       parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'run_command',
+      description:
+        'Run one shell command in the project folder to verify real behaviour (node --check app.js, ls, git status, node script.js). The command must be a single line of at most 400 characters; there is a 20-second timeout and privileged or destructive commands (sudo, rm -rf /, git push, formatting disks) are refused. In ask mode every command needs the user\'s approval first, so batch your questions: ask for commands only when the built-in checks cannot answer.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'The single shell command to run, at most 400 characters.' },
+        },
+        required: ['command'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 /* ------------------------------------------------------------------ */
@@ -171,6 +189,7 @@ const TOOLS = `You can inspect your own work with tools. Available functions:
 - interact_with_preview(action, target, text, key): click, type or press a key in the preview to verify an interaction end to end.
 - read_project_file(path): read a file's full current contents.
 - run_checks(): run the project checks (syntax, structure, missing files).
+- run_command(command): run one shell command in the project folder (node --check app.js, ls, git status) and see its real output. In ask mode the user approves every command first, so prefer the built-in tools when they can answer and batch command needs into few calls.
 
 Use them the way a careful engineer does: write the files, inspect, fix what is broken, inspect again. Keep tool use tight — usually one inspect after a change and one more interaction only when behaviour matters. Do not narrate the tool calls in prose; the interface shows them.`
 
@@ -199,7 +218,7 @@ ${INTEGRATIONS}
 
 ${PLAN_PROTOCOL}
 
-You are in ASK MODE: every batch of file blocks you emit is shown to the user for approval before it is applied.
+You are in ASK MODE: every batch of file blocks you emit is shown to the user for approval before it is applied, and every command you ask run_command to run is approved the same way before it executes.
 
 - Keep emitting complete file blocks exactly as usual; the interface collects them into one approval card.
 - The user either approves the batch (it is applied, and you continue) or rejects it (you are told in the next message).

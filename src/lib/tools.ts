@@ -7,6 +7,7 @@
  * can see what went wrong and try something else.
  */
 
+import { execCommand, type ExecEvent } from './agent'
 import { formatChecks, runChecks } from './checks'
 import { channelFor, type InteractResult, type PreviewInspector, type PreviewSnapshot } from './inspector'
 import type { ToolCall } from './protocol'
@@ -24,6 +25,11 @@ export type ToolOutcome = {
 export type ToolContext = {
   inspector: PreviewInspector
   project: Project
+  /**
+   * Runs one command through the dev-server terminal. Ask mode gates this tool
+   * on the user's approval before it is ever called; other tools run freely.
+   */
+  runCommand?: (command: string) => Promise<ToolOutcome>
 }
 
 const MAX_READ_CHARS = 20_000
@@ -41,6 +47,14 @@ export async function executeTool(call: ToolCall, context: ToolContext): Promise
         return readProjectFile(context, String(args.path ?? ''))
       case 'run_checks':
         return runProjectChecks(context)
+      case 'run_command':
+        return context.runCommand
+          ? context.runCommand(String(args.command ?? ''))
+          : {
+              ok: false,
+              summary: 'Command execution is unavailable',
+              text: 'Command execution is not available in this environment.',
+            }
       default:
         return {
           ok: false,
@@ -227,6 +241,86 @@ function parseArgs(raw: string): Record<string, unknown> {
   }
 }
 
+/** Mirrors MAX_COMMAND_LENGTH on the server; longer commands are refused there. */
+const MAX_COMMAND_CHARS = 400
+
+/**
+ * Builds the run_command handler on top of the dev-server terminal: the project
+ * files are synced (as /api/exec always does) and the command runs in the bound
+ * folder when there is one, in the scratch copy otherwise.
+ */
+export function makeRunCommandHandler(input: {
+  files: { path: string; content: string }[]
+  onEvent?: (event: ExecEvent) => void
+  cwd?: string
+  signal?: AbortSignal
+}): (command: string) => Promise<ToolOutcome> {
+  return async (command: string) => {
+    const trimmed = command.trim()
+    if (!trimmed) {
+      return {
+        ok: false,
+        summary: 'Команда — пусто',
+        text: 'The command argument was empty. Pass the command to run as a string.',
+      }
+    }
+
+    const collected: { kind: 'stdout' | 'stderr'; text: string }[] = []
+    let exit: { code: number | null; timedOut: boolean } | null = null
+    let error: string | undefined
+
+    const result = await execCommand(
+      trimmed.slice(0, MAX_COMMAND_CHARS),
+      input.files,
+      (event: ExecEvent) => {
+        if (event.type === 'stdout' || event.type === 'stderr') {
+          collected.push({ kind: event.type, text: event.text })
+        } else if (event.type === 'exit') {
+          exit = { code: event.code, timedOut: event.timedOut }
+        } else if (event.type === 'error') {
+          error = event.message
+        }
+        input.onEvent?.(event)
+      },
+      input.signal,
+      input.cwd,
+    )
+
+    if (!result.ok) {
+      const text = result.error === 'stopped'
+        ? 'The turn was stopped before the command ran.'
+        : `The command was rejected: ${result.error ?? 'unknown error'}.`
+      return { ok: false, summary: `${trimmed} — отклонено`, text }
+    }
+
+    const output = (['stdout', 'stderr'] as const)
+      .map((kind) => {
+        const text = collected
+          .filter((entry) => entry.kind === kind)
+          .map((entry) => entry.text)
+          .join('')
+          .trimEnd()
+        return text ? `${kind}:\n${text}` : ''
+      })
+      .filter(Boolean)
+      .join('\n\n')
+
+    // The exit event arrives from the stream callback, which the type checker
+    // cannot see run, so the type is stated here instead of inferred.
+    const finished: { code: number | null; timedOut: boolean } = exit ?? { code: null, timedOut: false }
+    const exitLine = finished.timedOut
+      ? 'The command timed out after 20s and was killed.'
+      : `Exited with code ${finished.code ?? 'unknown'}.`
+    const body = [output, exitLine].filter(Boolean).join('\n\n')
+
+    return {
+      ok: !finished.timedOut && (finished.code ?? 1) === 0,
+      summary: trimmed,
+      text: error ? `${body}\n\n${error}` : body,
+    }
+  }
+}
+
 export function label(name: string): string {
   return TOOL_LABELS[name] ?? name
 }
@@ -240,6 +334,8 @@ export function describeCall(call: ToolCall): string {
       return `${String(args.action ?? 'act')}${args.target ? ` "${String(args.target)}"` : ''}`
     case 'read_project_file':
       return String(args.path ?? 'file')
+    case 'run_command':
+      return String(args.command ?? 'command')
     default:
       return label(call.name)
   }

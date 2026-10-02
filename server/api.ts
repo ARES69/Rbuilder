@@ -370,9 +370,9 @@ async function forwardProvider(
       stream_options: { include_usage: true },
       messages,
       max_tokens: config.maxTokens,
-      // Tools are only offered while building, and not on the final step of a
-      // spent budget: plan mode must not touch files either.
-      ...(mode === 'build' && options.tools
+      // Tools are offered while building or verifying in ask mode, and not on
+      // the final step of a spent budget: plan mode must not touch files either.
+      ...(mode !== 'plan' && options.tools
         ? { tools: TOOL_DEFINITIONS, tool_choice: 'auto' }
         : {}),
     }),
