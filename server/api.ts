@@ -411,7 +411,10 @@ async function forwardProvider(
       }
     }
     const total = tokenTotal(data?.usage)
-    if (total !== undefined) writeEvent(res, { type: 'usage', totalTokens: total })
+    if (total !== undefined) {
+      const split = tokenSplit(data?.usage)
+      writeEvent(res, { type: 'usage', totalTokens: total, ...(split ? { split } : {}) })
+    }
     if (!message?.content?.trim() && !(message?.tool_calls?.length)) {
       writeEvent(res, { type: 'error', message: 'The model returned an empty response.' })
     }
@@ -439,7 +442,13 @@ async function forwardProvider(
           if (chunk.delta) writeEvent(res, { type: 'delta', delta: chunk.delta })
           if (chunk.toolCalls.length > 0) accumulateToolCalls(toolCalls, chunk.toolCalls)
           if (chunk.totalTokens !== undefined) {
-            writeEvent(res, { type: 'usage', totalTokens: chunk.totalTokens })
+            writeEvent(res, {
+              type: 'usage',
+              totalTokens: chunk.totalTokens,
+              // Sent alongside the total so the client can bill input and output
+              // at their own rates; absent when the provider reports only a total.
+              ...(chunk.split ? { split: chunk.split } : {}),
+            })
           }
         }
       }
@@ -475,6 +484,24 @@ export function tokenTotal(usage?: ProviderUsage): number | undefined {
   return Number.isFinite(total) && total > 0 ? Math.round(total) : undefined
 }
 
+/**
+ * Input and output tokens, when the provider breaks them down.
+ *
+ * Billing needs the split: the two are priced differently, and an agent turn is
+ * input-heavy. Undefined when only a total is available, so the caller can say
+ * it is estimating instead of pretending to know.
+ */
+export function tokenSplit(usage?: ProviderUsage): { input: number; output: number } | undefined {
+  if (!usage) return undefined
+  const input = usage.prompt_tokens
+  const output = usage.completion_tokens
+  if (!Number.isFinite(input) && !Number.isFinite(output)) return undefined
+  return {
+    input: Number.isFinite(input) ? Math.max(0, Math.round(input!)) : 0,
+    output: Number.isFinite(output) ? Math.max(0, Math.round(output!)) : 0,
+  }
+}
+
 type ProviderResponse = {
   usage?: ProviderUsage
   choices?: Array<{
@@ -490,6 +517,7 @@ function parseChunk(payload: string): {
   delta: string
   toolCalls: ProviderToolCallDelta[]
   totalTokens?: number
+  split?: { input: number; output: number }
 } {
   try {
     const parsed = JSON.parse(payload) as ProviderResponse
@@ -499,6 +527,7 @@ function parseChunk(payload: string): {
       toolCalls: choice?.delta?.tool_calls ?? [],
       // The usage chunk arrives with an empty choices array. Keep listening.
       totalTokens: tokenTotal(parsed.usage),
+      split: tokenSplit(parsed.usage),
     }
   } catch {
     return { delta: '', toolCalls: [] }

@@ -671,6 +671,25 @@
   font-size: 10.5px;
 }
 
+/*
+ * The cost sits with the model picker, because that is where the decision is
+ * made. An unpriced or unreported turn is styled differently rather than shown
+ * as a number: "$0.00" next to a model would read as free, which is the one
+ * thing this must never imply.
+ */
+.cost-chip {
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  cursor: default;
+}
+.cost-chip--priced { color: var(--fg-muted); }
+.cost-chip--unpriced,
+.cost-chip--unknown { color: var(--warn); opacity: 0.85; font-style: italic; }
+.cost-chip--free { color: var(--add); }
+
 .send-button {
   appearance: none;
   display: grid;

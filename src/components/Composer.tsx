@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { AttachmentChips } from './AttachmentChips'
 import type { AttachmentMeta } from '../lib/attachments'
 import { budgetUsed, describeBudget, formatDuration, msLeft, type Budget } from '../lib/budget'
+import { describeCost, formatCost, type CostResult, type SessionSpend } from '../lib/pricing'
 import type { AgentMode } from '../lib/protocol'
 
 type Props = {
@@ -14,6 +15,10 @@ type Props = {
   budget: Budget | null
   /** True once the turn is landing: tools are withdrawn and it is writing up. */
   wrappingUp: boolean
+  /** What the last turn cost, or null before the first one. */
+  lastCost: CostResult | null
+  /** Running total for this session. */
+  spend: SessionSpend
   reading: boolean
   attachments: AttachmentMeta[]
   onAttach: (files: FileList | File[]) => void
@@ -41,6 +46,8 @@ export function Composer({
   busy,
   budget,
   wrappingUp,
+  lastCost,
+  spend,
   reading,
   attachments,
   onAttach,
@@ -192,6 +199,17 @@ export function Composer({
                     return list.map((entry) => <option key={entry} value={entry}>{entry}</option>)
                   })()}
                 </select>
+              ) : null}
+              {lastCost ? (
+                <span
+                  className={`cost-chip cost-chip--${lastCost.kind}`}
+                  title={`${describeCost(lastCost)}. Цены зафиксированы 2026-10-02 и могут измениться у провайдера.`}
+                >
+                  {lastCost.kind === 'priced' ? formatCost(lastCost.cost) : describeCost(lastCost)}
+                  {spend.turns > 1 && spend.complete && lastCost.kind === 'priced'
+                    ? ` · всего ${formatCost(spend.cost)}`
+                    : ''}
+                </span>
               ) : null}
             </div>
             {busy ? (

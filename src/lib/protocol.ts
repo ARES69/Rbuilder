@@ -41,7 +41,7 @@ export type StreamEvent =
   | { type: 'meta'; configured: true; model: string }
   | { type: 'delta'; delta: string }
   | { type: 'tool_call'; id: string; name: string; arguments: string }
-  | { type: 'usage'; totalTokens: number }
+  | { type: 'usage'; totalTokens: number; split?: { input: number; output: number } }
   | { type: 'unconfigured'; message: string }
   | { type: 'error'; message: string }
   | { type: 'done' }
