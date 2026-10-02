@@ -9,8 +9,9 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Directories that are never interesting to import.
-const SKIPPED_DIRS: &[&str] = &[
+/// Directories that are never interesting to import. The folder watcher skips
+/// the same list, so a generated tree cannot keep waking the poller.
+pub const SKIPPED_DIRS: &[&str] = &[
     ".git", "node_modules", "target", "dist", "dist-server", "build", "out", ".next", ".venv",
     "venv", "__pycache__", ".cache", "coverage", ".idea", ".vscode", ".freebuff",
     ".freebuff-workspace", ".freebuff-build",
