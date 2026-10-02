@@ -15,7 +15,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export const WORKSPACE_DIR = '.freebuff-workspace'
@@ -97,10 +97,24 @@ export async function materializeProject(root: string, files: CommandFile[]): Pr
 
 /**
  * Writes `files` directly into `dir` — the folder the user bound to this
- * project — and returns it. The bound folder is the real home of the project,
- * so a terminal command sees exactly what the model wrote.
+ * project — and returns it, so a terminal command runs against the real tree.
+ *
+ * For a bound folder the file on disk wins over anything the client sends. The
+ * client re-sends its whole project on every command, so a blind write replaced
+ * an edit made in the user's editor with the older in-memory copy the moment
+ * they ran anything in the terminal — work silently lost, and the folder watcher
+ * then reported the app's own overwrite as an external change. Writes are the
+ * shell's job here only for files that do not exist yet; the agent's real writes
+ * go through the shell bridge, which is explicit about changing a file.
+ *
+ * `acceptExternal` is for the one case where the client's copy is known to be
+ * the newer truth: it has just re-read the folder, so the two are in sync.
  */
-export async function writeProjectInto(dir: string, files: CommandFile[]): Promise<string> {
+export async function writeProjectInto(
+  dir: string,
+  files: CommandFile[],
+  options: { acceptExternal?: boolean } = {},
+): Promise<string> {
   await mkdir(dir, { recursive: true })
 
   for (const file of files) {
@@ -108,6 +122,12 @@ export async function writeProjectInto(dir: string, files: CommandFile[]): Promi
     if (!relative) continue
 
     const target = path.join(dir, relative)
+    const current = await readFile(target, 'utf8').catch(() => null)
+    if (current === file.content) continue
+    // Never clobber a file that exists and differs, unless the caller has just
+    // re-read the folder and says these contents came from it.
+    if (current !== null && !options.acceptExternal) continue
+
     await mkdir(path.dirname(target), { recursive: true })
     await writeFile(target, file.content, 'utf8')
   }
