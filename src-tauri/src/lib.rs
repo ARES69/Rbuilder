@@ -6,6 +6,7 @@
 //! The shell also provides the two things a plain browser cannot do well:
 //! native folder import and a real save dialog.
 
+mod folder_watch;
 mod sidecar;
 mod workspace_files;
 
@@ -20,6 +21,9 @@ use workspace_files::ImportedProject;
 /// process stays alive for exactly as long as the app does.
 pub struct AppState {
     server: Mutex<Option<sidecar::SidecarGuard>>,
+    /// At most one watcher: the front end restarts it when the bound folder
+    /// changes, so a second concurrent one would only duplicate events.
+    watch: Mutex<Option<folder_watch::FolderWatch>>,
     #[allow(dead_code)]
     port: u16,
 }
@@ -88,6 +92,40 @@ async fn save_text_file(
     }
 }
 
+/// Starts watching the bound project folder, replacing any previous watcher.
+#[tauri::command]
+async fn watch_project_folder(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    root: String,
+) -> Result<(), String> {
+    // Stop the old watcher before starting a new one: the thread holds the
+    // previous root and would keep reporting changes for a folder the user has
+    // already left.
+    if let Ok(mut guard) = state.watch.lock() {
+        if let Some(mut previous) = guard.take() {
+            previous.stop();
+        }
+    }
+    let watch = folder_watch::start(app, root)?;
+    if let Ok(mut guard) = state.watch.lock() {
+        *guard = Some(watch);
+    }
+    Ok(())
+}
+
+/// Stops the watcher, if one is running. Idempotent: the front end calls this
+/// when a task is unbound and on teardown.
+#[tauri::command]
+async fn unwatch_project_folder(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Ok(mut guard) = state.watch.lock() {
+        if let Some(mut watch) = guard.take() {
+            watch.stop();
+        }
+    }
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -101,6 +139,7 @@ pub fn run() {
             let guard = sidecar::spawn_server(port).map_err(|e| e.to_string())?;
             app.manage(AppState {
                 server: Mutex::new(Some(guard)),
+                watch: Mutex::new(None),
                 port,
             });
 
@@ -126,7 +165,9 @@ pub fn run() {
             write_project_files,
             delete_project_file,
             reveal_in_explorer,
-            save_text_file
+            save_text_file,
+            watch_project_folder,
+            unwatch_project_folder
         ])
         .build(tauri::generate_context!())
         .expect("error while building the tauri application")

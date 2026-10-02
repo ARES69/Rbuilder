@@ -23,6 +23,12 @@ import {
   type ImportedFolder,
 } from './lib/desktop'
 import { GIT_CHANGED_EVENT, readGitState } from './lib/git'
+import {
+  FOLDER_CHANGED_EVENT,
+  notifyFolderSynced,
+  planExternalSync,
+  watchProjectFolder,
+} from './lib/folderWatch'
 import { attachmentsToContext, type AttachmentMeta } from './lib/attachments'
 import type { Budget } from './lib/budget'
 import { runChecks, type ChecksResult } from './lib/checks'
@@ -311,6 +317,61 @@ export default function App() {
     window.addEventListener(GIT_CHANGED_EVENT, refreshGit)
     return () => window.removeEventListener(GIT_CHANGED_EVENT, refreshGit)
   }, [refreshGit])
+
+  // External edits: the shell polls the bound folder, and an event re-reads it.
+  // The watcher follows the task's folder, so switching tasks or unbinding
+  // stops the old one instead of reporting a folder the user already left.
+  useEffect(() => {
+    const folder = workspace.metadata.localPath
+    if (!folder) return
+    let dispose: (() => void) | null = null
+    let cancelled = false
+    void watchProjectFolder(folder).then((stop) => {
+      if (cancelled) stop?.()
+      else dispose = stop
+    })
+    return () => {
+      cancelled = true
+      dispose?.()
+    }
+  }, [workspace.metadata.localPath])
+
+  /**
+   * Applies what changed on disk without touching anything else. Files the
+   * agent is mid-way through writing are left alone: a re-read during a turn
+   * would either resurrect an older copy or drop a file that exists in memory
+   * but has not been mirrored yet. The git panel is notified afterwards so the
+   * status line reflects the same tree the workbench shows.
+   */
+  useEffect(() => {
+    const onFolderChanged = () => {
+      const folder = folderRef.current
+      if (!folder) return
+      // Read refs directly: this fires outside a render, and a stale `busy`
+      // here would let a turn's half-written files be overwritten.
+      if (busyRef.current) return
+
+      void readProjectFolder(folder)
+        .then((source) => {
+          const next = planExternalSync({
+            current: projectRef.current.files,
+            incoming: source.files,
+            folder,
+            busy: busyRef.current,
+          })
+          if (next.kind !== 'apply') return
+          // `removed` is only populated from a read that produced files, so
+          // applying it cannot empty the project.
+          for (const path of next.removed) dispatch({ type: 'project/delete', path })
+          if (next.changed.length > 0) dispatch({ type: 'project/apply', files: next.changed })
+          notifyFolderSynced(folder)
+        })
+        .catch((error) => console.warn('Не удалось перечитать папку проекта:', error))
+    }
+
+    window.addEventListener(FOLDER_CHANGED_EVENT, onFolderChanged)
+    return () => window.removeEventListener(FOLDER_CHANGED_EVENT, onFolderChanged)
+  }, [])
 
   useEffect(() => {
     if (import.meta.env.DEV) {
