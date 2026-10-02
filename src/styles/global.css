@@ -1075,6 +1075,73 @@ select {
 .git-message { max-width: 220px; min-width: 120px; }
 .git-panel .panel-actions { flex-wrap: wrap; row-gap: 8px; }
 .git-panel .panel-status { flex: 1 1 140px; }
+.git-file {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-file:hover { color: var(--fg); text-decoration: underline; }
+.git-diff {
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.git-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.git-diff-body {
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-4);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.git-diff-line { display: block; }
+.git-diff-line--add { color: var(--add); }
+.git-diff-line--remove { color: var(--del); }
+.git-diff-line--meta { color: var(--fg-dim); }
+.git-section-label {
+  display: block;
+  padding: var(--space-3) var(--space-4) var(--space-1);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.git-branches, .git-tags, .git-log { border-top: 1px solid var(--line); }
+.git-branch-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 var(--space-4) var(--space-2); }
+.git-branch {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+.git-branch--current { border-color: var(--accent); color: var(--accent); cursor: default; }
+.git-branches .input, .git-tags .input { margin: 0 var(--space-4) var(--space-2); }
+.git-hash { color: var(--accent); flex: 0 0 auto; }
+.git-subject { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-author { color: var(--fg-dim); flex: 0 0 auto; }
 
 /* Files --- */
 

@@ -19,6 +19,8 @@ type Props = {
   onTabChange: (tab: InspectorTab) => void
   project: Project
   baselineProject: Project
+  /** The bound project folder, passed through to the Git panel. */
+  folder: string | null
   document: string
   /** A failed preview compile, shown above the preview frame. */
   bundleError?: string | null
@@ -198,6 +200,7 @@ export function InspectorPanel(props: Props) {
             files={props.filePaths}
             project={project}
             baselineProject={props.baselineProject}
+            folder={props.folder}
             hasIndex={props.hasIndex}
             inspector={props.inspector}
             tab={props.dockTab}

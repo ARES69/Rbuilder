@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { changeLabel, GIT_STATE_COMMAND, gitCommitCommand, gitTone, parseGitState } from '../src/lib/git'
+import {
+  changeLabel,
+  GIT_STATE_COMMAND,
+  gitCheckoutCommand,
+  gitCommitCommand,
+  gitDiffCommand,
+  gitTagCommand,
+  gitTone,
+  parseGitExtra,
+  parseGitState,
+  parseUnifiedDiff,
+} from '../src/lib/git'
 
 describe('git state parsing', () => {
   it('reads branch, changes and last commit out of one command', () => {
@@ -76,5 +87,114 @@ describe('git commands', () => {
     const command = gitCommitCommand('fix "quoted" thing')
     expect(command).toContain(`fix 'quoted' thing`)
     expect(command.match(/"/g)).toHaveLength(2)
+  })
+
+  it('quotes a diff path so it cannot become a second command', () => {
+    // A path reaches this from `git status`; quoting keeps the shell from
+    // reading the rest of it as syntax.
+    expect(gitDiffCommand('src/app.ts')).toBe(`git --no-pager diff --no-color -- 'src/app.ts'`)
+    // A legitimate name with a space survives: filtering would have mangled it.
+    expect(gitDiffCommand('my notes.md')).toBe(`git --no-pager diff --no-color -- 'my notes.md'`)
+    // Only an embedded quote or a newline can break out of the quotes.
+    expect(gitDiffCommand("it's")).toBe('true')
+    expect(gitDiffCommand('a\nb')).toBe('true')
+  })
+
+  it('refuses an unsafe branch or tag name instead of guessing', () => {
+    expect(gitCheckoutCommand('feature/login')).toContain(`git checkout -q -- 'feature/login'`)
+    expect(gitCheckoutCommand('feature/login')).toContain(`-b -- 'feature/login'`)
+    expect(gitTagCommand('v1.0')).toBe(`git tag -- 'v1.0'`)
+    expect(gitCheckoutCommand('$(whoami)')).toBe(`git checkout -q -- '$(whoami)' 2>/dev/null || git checkout -q -b -- '$(whoami)'`)
+    expect(gitTagCommand('  ')).toBe('true')
+    expect(gitTagCommand('')).toBe('true')
+  })
+})
+
+describe('git extras parsing', () => {
+  it('reads branches, tags, remote, tracking and history in one round trip', () => {
+    const output = [
+      'RB_BRANCHES',
+      'main',
+      'feature/login',
+      'RB_TAGS',
+      'v0.1.5',
+      'RB_REMOTE',
+      'git@github.com:ARES69/Rbuilder.git',
+      'RB_TRACKING',
+      'origin/main',
+      'RB_LOG',
+      'a1b2c3dARES692026-10-01Move tasks to IndexedDB',
+      'b786ab2ARES692026-10-02Watch the project folder',
+      '',
+    ].join('\n')
+
+    const extra = parseGitExtra(output)
+    expect(extra.branches).toEqual(['main', 'feature/login'])
+    expect(extra.tags).toEqual(['v0.1.5'])
+    expect(extra.remote).toBe('git@github.com:ARES69/Rbuilder.git')
+    expect(extra.tracking).toBe('origin/main')
+    expect(extra.commits.map((commit) => commit.subject)).toEqual([
+      'Move tasks to IndexedDB',
+      'Watch the project folder',
+    ])
+    expect(extra.commits[0]!.hash).toBe('a1b2c3d')
+  })
+
+  it('treats a fresh repository as empty rather than broken', () => {
+    // `git init` with no commit: every section answers nothing, and that is a
+    // normal state the panel has to render.
+    const extra = parseGitExtra('RB_BRANCHES\nRB_TAGS\nRB_REMOTE\nRB_TRACKING\nRB_LOG\n')
+    expect(extra.branches).toEqual([])
+    expect(extra.tags).toEqual([])
+    expect(extra.remote).toBeNull()
+    expect(extra.tracking).toBeNull()
+    expect(extra.commits).toEqual([])
+  })
+
+  it('skips a log line that is missing a field', () => {
+    const extra = parseGitExtra('RB_LOG\nonly-a-hash\n')
+    expect(extra.commits).toEqual([])
+  })
+
+  it('flags a branch that diverged from its upstream', () => {
+    // porcelain=v2 reports `branch.ab +N -M`, not the word "ahead".
+    expect(parseGitExtra('RB_SYNC\n# branch.ab +1 -0\n').outOfSync).toBe(true)
+    expect(parseGitExtra('RB_SYNC\n# branch.ab +0 -3\n').outOfSync).toBe(true)
+    expect(parseGitExtra('RB_SYNC\n# branch.ab +0 -0\n').outOfSync).toBe(false)
+    // No upstream at all: nothing to be out of sync with.
+    expect(parseGitExtra('RB_SYNC\n').outOfSync).toBe(false)
+  })
+})
+
+describe('unified diff parsing', () => {
+  it('tags added, removed, context and meta lines', () => {
+    const lines = parseUnifiedDiff(
+      [
+        'diff --git a/index.html b/index.html',
+        'index 1234567..89abcde 100644',
+        '--- a/index.html',
+        '+++ b/index.html',
+        '@@ -1,3 +1,3 @@',
+        ' <h1>one</h1>',
+        '-<p>old</p>',
+        '+<p>new</p>',
+        ' <footer/>',
+      ].join('\n'),
+    )
+
+    expect(lines.filter((line) => line.kind === 'add').map((line) => line.text)).toEqual([
+      '+<p>new</p>',
+    ])
+    expect(lines.filter((line) => line.kind === 'remove').map((line) => line.text)).toEqual([
+      '-<p>old</p>',
+    ])
+    expect(lines.filter((line) => line.kind === 'context')).toHaveLength(2)
+    // The hunk header stays visible so the reader knows the range it covers.
+    expect(lines.some((line) => line.text.startsWith('@@'))).toBe(true)
+  })
+
+  it('returns nothing when the file matches HEAD', () => {
+    expect(parseUnifiedDiff('')).toEqual([])
+    expect(parseUnifiedDiff('\n\n')).toEqual([])
   })
 })

@@ -16,6 +16,8 @@ type Props = {
   files: string[]
   project: Project
   baselineProject: Project
+  /** The bound project folder, so the Git panel reads the real repository. */
+  folder: string | null
   hasIndex: boolean
   inspector: PreviewInspector
   tab: DockTab
@@ -148,6 +150,7 @@ export function PreviewPane(props: Props) {
       <Dock
         project={props.project}
         baselineProject={props.baselineProject}
+        folder={props.folder}
         tab={props.tab}
         onTabChange={props.onTabChange}
         inspector={inspector}

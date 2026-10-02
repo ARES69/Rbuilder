@@ -47,6 +47,67 @@ export const GIT_STATE_COMMAND = [
 export const GIT_INIT_COMMAND =
   'git init -q -b main 2>/dev/null || git init -q'
 
+/**
+ * The rest of the panel's state in one round trip, behind the same `.git`
+ * guard: branches, tags, the remote and the recent history. A repository
+ * without commits makes most of these answer nothing, so each is guarded with
+ * `|| true` to keep the whole command successful.
+ */
+export const GIT_EXTRA_COMMAND = [
+  'if [ -d .git ]; then',
+  'echo RB_BRANCHES; git branch --format="%(refname:short)" 2>/dev/null || true;',
+  'echo RB_TAGS; git tag --list 2>/dev/null || true;',
+  'echo RB_REMOTE; git remote get-url origin 2>/dev/null || true;',
+  'echo RB_TRACKING; git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true;',
+  'echo RB_LOG; git log -20 --pretty=format:"%h%x1f%an%x1f%ad%x1f%s" --date=short 2>/dev/null || true;',
+  // Ahead/behind lives in `branch.ab +N -M`, not in a word like "ahead", so it
+  // is read from that line rather than guessed.
+  'echo RB_SYNC; git status --porcelain=v2 --branch 2>/dev/null | grep -m1 "^# branch.ab" || true;',
+  'else echo RB_NO_REPO; fi',
+].join(' ')
+
+/**
+ * Single-quotes a value for the shell.
+ *
+ * These values become part of a shell string, so they are quoted rather than
+ * filtered: stripping disallowed characters would silently rewrite a legitimate
+ * filename like `my notes.md` into `mynotes.md`. Only an embedded quote or a
+ * newline can break out of the quotes, and both are refused outright.
+ */
+function shellQuote(value: string): string | null {
+  if (!value.trim() || /['\n\r\0]/.test(value)) return null
+  return `'${value}'`
+}
+
+/**
+ * A working-tree diff for one path. The path comes from `git status`, so it is
+ * quoted rather than trusted.
+ */
+export function gitDiffCommand(path: string): string {
+  const safe = shellQuote(path)
+  if (!safe) return 'true'
+  return `git --no-pager diff --no-color -- ${safe}`
+}
+
+/** Switches to an existing branch, and creates it when there is none. */
+export function gitCheckoutCommand(branch: string): string {
+  const safe = shellQuote(branch)
+  if (!safe) return 'true'
+  return `git checkout -q -- ${safe} 2>/dev/null || git checkout -q -b -- ${safe}`
+}
+
+/** Tags the current commit; an empty or unquotable name is refused. */
+export function gitTagCommand(name: string): string {
+  const safe = shellQuote(name)
+  if (!safe) return 'true'
+  return `git tag -- ${safe}`
+}
+
+export const GIT_PUSH_COMMAND =
+  'git push -u origin HEAD 2>&1 || git push 2>&1'
+
+export const GIT_PULL_COMMAND = 'git pull --ff-only 2>&1'
+
 /** Fired after a git action so the sidebar summary can catch up. */
 export const GIT_CHANGED_EVENT = 'rbuilder:git-changed'
 
@@ -118,6 +179,122 @@ export function changeLabel(change: GitChange): string {
   return 'M'
 }
 
+/** One line of `git log`. */
+export type GitCommit = {
+  hash: string
+  author: string
+  date: string
+  subject: string
+}
+
+export type GitExtra = {
+  branches: string[]
+  tags: string[]
+  /** The `origin` URL, when there is one. */
+  remote: string | null
+  /** The upstream branch (`origin/main`), when the branch tracks one. */
+  tracking: string | null
+  /** True when the branch is ahead, behind, or both. */
+  outOfSync: boolean
+  commits: GitCommit[]
+}
+
+/** The ASCII unit separator the log format uses between fields. */
+const FIELD = '\x1f'
+
+/**
+ * Parses the marked output of GIT_EXTRA_COMMAND.
+ *
+ * Everything here is best-effort: a repository with no commits answers with
+ * empty sections, and that is a normal state (just `git init`), not an error.
+ */
+export function parseGitExtra(output: string): GitExtra {
+  const extra: GitExtra = {
+    branches: [],
+    tags: [],
+    remote: null,
+    tracking: null,
+    outOfSync: false,
+    commits: [],
+  }
+  let section = ''
+
+  for (const line of output.split(/\r?\n/)) {
+    if (line === 'RB_BRANCHES' || line === 'RB_TAGS' || line === 'RB_REMOTE' ||
+        line === 'RB_TRACKING' || line === 'RB_LOG' || line === 'RB_SYNC') {
+      section = line
+      continue
+    }
+    if (!line.trim()) continue
+
+    if (section === 'RB_BRANCHES') {
+      extra.branches.push(line.trim())
+    } else if (section === 'RB_TAGS') {
+      extra.tags.push(line.trim())
+    } else if (section === 'RB_REMOTE') {
+      // A remote path can contain spaces, so the value is kept whole.
+      extra.remote = line.trim()
+    } else if (section === 'RB_TRACKING') {
+      extra.tracking = line.trim()
+    } else if (section === 'RB_SYNC') {
+      extra.outOfSync = isAheadBehind(line)
+    } else if (section === 'RB_LOG') {
+      const commit = parseLogLine(line)
+      if (commit) extra.commits.push(commit)
+    }
+  }
+
+  return extra
+}
+
+/** `# branch.ab +N -M` — anything but `+0 -0` means the branch has diverged. */
+function isAheadBehind(line: string): boolean {
+  const match = line.match(/\+(\d+)\s+-(\d+)/)
+  if (!match) return false
+  return match[1] !== '0' || match[2] !== '0'
+}
+
+/** `hash␟author␟date␟subject` — a line missing any field is skipped, not guessed. */
+function parseLogLine(line: string): GitCommit | null {
+  const [hash, author, date, ...rest] = line.split(FIELD)
+  if (!hash || !author || !date) return null
+  return { hash, author, date, subject: rest.join(FIELD) }
+}
+
+/** One line of a unified diff, tagged for rendering. */
+export type DiffLine = { kind: 'context' | 'add' | 'remove' | 'meta'; text: string }
+
+/**
+ * Turns a unified diff into renderable lines.
+ *
+ * `git diff` exits 0 with no output when nothing differs, so an empty result is
+ * the normal "no changes" case. Only the hunk bodies are tagged; the
+ * `diff --git`/`@@` preamble is kept as meta so the reader still sees which
+ * file and which range the hunk covers.
+ */
+export function parseUnifiedDiff(output: string): DiffLine[] {
+  const lines: DiffLine[] = []
+  for (const raw of output.split(/\r?\n/)) {
+    if (!raw) continue
+    if (raw.startsWith('+++') || raw.startsWith('---')) {
+      lines.push({ kind: 'meta', text: raw })
+    } else if (raw.startsWith('@@')) {
+      lines.push({ kind: 'meta', text: raw })
+    } else if (raw.startsWith('diff ') || raw.startsWith('index ') ||
+               raw.startsWith('old mode') || raw.startsWith('new mode') ||
+               raw.startsWith('Binary files') || raw.startsWith('\\')) {
+      lines.push({ kind: 'meta', text: raw })
+    } else if (raw.startsWith('+')) {
+      lines.push({ kind: 'add', text: raw })
+    } else if (raw.startsWith('-')) {
+      lines.push({ kind: 'remove', text: raw })
+    } else {
+      lines.push({ kind: 'context', text: raw })
+    }
+  }
+  return lines
+}
+
 /** The panel's states, so the class names stay in one place. */
 export type GitTone = 'clean' | 'dirty' | 'missing'
 
@@ -165,4 +342,29 @@ export async function readGitState(
   // the error next to it rather than pretending the tree is clean.
   if (!result.ok && result.error && !state.isRepo) state.error = result.error
   return state
+}
+
+/** Branches, tags, the remote and the recent history for the same workspace. */
+export async function readGitExtra(
+  files: { path: string; content: string }[],
+  signal?: AbortSignal,
+  cwd?: string,
+): Promise<GitExtra> {
+  const result = await runGit(GIT_EXTRA_COMMAND, files, signal, cwd)
+  return parseGitExtra(result.output)
+}
+
+/**
+ * The diff for one path. A repository without commits has nothing to diff
+ * against, so the command reports that instead of returning an empty string
+ * that would read as "no changes".
+ */
+export async function readGitDiff(
+  files: { path: string; content: string }[],
+  path: string,
+  signal?: AbortSignal,
+  cwd?: string,
+): Promise<DiffLine[]> {
+  const result = await runGit(gitDiffCommand(path), files, signal, cwd)
+  return parseUnifiedDiff(result.output)
 }
