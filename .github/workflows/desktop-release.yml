@@ -56,6 +56,12 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      - name: Install Chromium for the visual tests
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run preview screenshot tests
+        run: pnpm test:visual
+
       - name: Build the front end
         run: pnpm exec vite build
 

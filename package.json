@@ -12,7 +12,9 @@
     "start": "node dist-server/index.js",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:visual": "vitest run --config vitest.visual.config.ts",
+    "test:visual:update": "UPDATE_VISUAL=1 vitest run --config vitest.visual.config.ts"
   },
   "dependencies": {
     "esbuild-wasm": "0.25.5",
@@ -29,6 +31,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "bun": "^1.4.2",
     "jsdom": "^30.0.1",
+    "playwright": "1.56.0",
     "typescript": "^5.9.3",
     "vite": "^7.1.9",
     "vitest": "^3.2.4"
