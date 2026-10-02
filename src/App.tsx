@@ -38,6 +38,8 @@ import {
   type ProjectFileInput,
 } from './lib/project'
 import { RUNTIME_SCRIPT } from './lib/previewRuntime'
+import { planBundle } from './lib/previewBundle'
+import { previewBundler } from './lib/previewCompiler'
 import {
   createWorkspace,
   projectFromWorkspaceFiles,
@@ -772,12 +774,50 @@ export default function App() {
     [],
   )
 
-  const previewDocument = useMemo(
-    // The preview needs the API address of the desktop shell: its generated apps
-    // call `/api/proxy` from an opaque origin, where a relative URL means nothing.
-    () => buildPreviewDocument(state.project, { channel, script: RUNTIME_SCRIPT, apiBase: apiBase() }),
-    [state.project, channel],
-  )
+  const [previewDoc, setPreviewDoc] = useState<string>('')
+  const [previewBundleError, setPreviewBundleError] = useState<string | null>(null)
+
+  // The preview needs the API address of the desktop shell: its generated apps
+  // call `/api/proxy` from an opaque origin, where a relative URL means nothing.
+  // A project that imports packages or writes JSX/TS is compiled first; plain
+  // projects take the synchronous path and never wait for the compiler.
+  useEffect(() => {
+    let cancelled = false
+    const injection = { channel, script: RUNTIME_SCRIPT, apiBase: apiBase() }
+    const plan = planBundle(state.project.files)
+
+    if (plan.entries.length === 0) {
+      setPreviewBundleError(null)
+      setPreviewDoc(buildPreviewDocument(state.project, injection))
+      return
+    }
+
+    // Compiling on every keystroke of a stream would queue dozens of wasm
+    // builds; the project settles first.
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const bundles: Record<string, string> = {}
+        let failure: { entry: string; error: string } | null = null
+
+        for (const entry of plan.entries) {
+          const outcome = await previewBundler()(entry, state.project.files)
+          if (outcome.ok) bundles[entry] = outcome.code
+          else failure = { entry: outcome.entry, error: outcome.error }
+        }
+
+        if (cancelled) return
+        setPreviewBundleError(failure ? `${failure.entry}: ${failure.error}` : null)
+        setPreviewDoc(
+          buildPreviewDocument(state.project, { ...injection, bundles, bundleError: failure }),
+        )
+      })()
+    }, 250)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [state.project, channel])
   const filePaths = useMemo(() => projectFilePaths(state.project), [state.project])
   const indexReady = useMemo(() => hasIndex(state.project), [state.project])
 
@@ -897,7 +937,8 @@ export default function App() {
         onTabChange={setInspectorTab}
         project={state.project}
         baselineProject={baselineProject}
-        document={previewDocument}
+        document={previewDoc}
+        bundleError={previewBundleError}
         channel={channel}
         filePaths={filePaths}
         hasIndex={indexReady}

@@ -121,10 +121,19 @@ function escapeScriptBody(script: string): string {
 }
 
 /**
- * Code the host injects into the preview: the runtime, its channel id, and where
- * the local API answers (only the desktop build needs the last one).
+ * Code the host injects into the preview: the runtime, its channel id, where
+ * the local API answers (only the desktop build needs the last one), and the
+ * compiled entry scripts when the project needed a compiler pass.
  */
-export type PreviewInjection = { channel: string; script: string; apiBase?: string }
+export type PreviewInjection = {
+  channel: string
+  script: string
+  apiBase?: string
+  /** Project path -> compiled code, inlined in place of the raw file. */
+  bundles?: Record<string, string>
+  /** A compile that failed: shown in the preview instead of failing silently. */
+  bundleError?: { entry: string; error: string } | null
+}
 
 /**
  * Builds the document rendered by the preview iframe. Stylesheets and scripts
@@ -157,8 +166,11 @@ export function buildPreviewDocument(project: Project, injection?: PreviewInject
       const file = resolveReference(files, src)
       if (!file) return tag
       const typeAttr = /\btype\s*=\s*["'][^"']*["']/i.exec(attrs)?.[0] ?? ''
+      // A compiled entry replaces the file's own source: same path, same place
+      // in the document, but already runnable by the browser.
+      const body = injection?.bundles?.[file.path] ?? file.content
       return `<script ${typeAttr} data-freebuff-path="${escapeAttribute(file.path)}">\n${escapeScriptBody(
-        file.content,
+        body,
       )}\n</script>`
     },
   )
@@ -172,7 +184,7 @@ function injectRuntime(html: string, injection: PreviewInjection): string {
     ? `<script>window.__freebuffApiBase=${JSON.stringify(injection.apiBase)};</script>\n`
     : ''
   const snippet = `<script>window.__freebuffChannel=${JSON.stringify(injection.channel)};</script>
-${apiBase}<script>${injection.script}</script>`
+${apiBase}<script>${injection.script}</script>${bundleNotice(injection)}`
 
   const head = /<head[^>]*>/i.exec(html)
   if (head) {
@@ -187,6 +199,17 @@ ${apiBase}<script>${injection.script}</script>`
   }
 
   return `${snippet}\n${html}`
+}
+
+/**
+ * A failed compile leaves the project unbuilt, so the preview says so instead
+ * of rendering a stale or half-translated app.
+ */
+function bundleNotice(injection: PreviewInjection): string {
+  const failure = injection.bundleError
+  if (!failure) return ''
+  const text = escapeHtml(`${failure.entry} не собрался:\n${failure.error}`)
+  return `<pre style="position:fixed;top:0;left:0;right:0;z-index:2147483647;margin:0;padding:12px 14px;background:#7f1d1d;color:#fee2e2;font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap">${text}</pre>`
 }
 
 /** Shown when the project has no index.html yet (or the agent removed it). */

@@ -20,6 +20,8 @@ type Props = {
   project: Project
   baselineProject: Project
   document: string
+  /** A failed preview compile, shown above the preview frame. */
+  bundleError?: string | null
   channel: string
   filePaths: string[]
   hasIndex: boolean
@@ -191,6 +193,7 @@ export function InspectorPanel(props: Props) {
         <div className="inspector-full">
           <PreviewPane
             document={props.document}
+            bundleError={props.bundleError}
             channel={props.channel}
             files={props.filePaths}
             project={project}
