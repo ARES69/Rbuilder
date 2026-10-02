@@ -56,6 +56,9 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      # The Rust side has its own tests (folder watching, path safety), and they
+      # were never wired in: the pipeline compiled the shell but never checked
+      # the logic in it.
       - name: Install Chromium for the visual tests
         run: pnpm exec playwright install --with-deps chromium
 
@@ -68,10 +71,18 @@ jobs:
       - name: Build the server bundle
         run: pnpm exec vite build --config vite.config.server.ts
 
+      # Unconditional, unlike the bundling steps below: the Rust tests need the
+      # sidecar to exist, and building it here also means a broken server build is
+      # caught on a pull request instead of at release time.
       - name: Compile the sidecar with Bun
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         run: |
           pnpm exec bun build dist-server/index.js --compile --outfile .freebuff-build/rbuilder-server.exe
+
+      # After the sidecar on purpose: tauri-build refuses to start without the bundled
+      # server resource, so an earlier step fails with "resource path ... doesn't
+      # exist".
+      - name: Run the Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Build the Tauri shell (MSI + NSIS)
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')

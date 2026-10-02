@@ -194,6 +194,31 @@ external URL, and a link to a file that does not exist. That last one matters �
 a dead link stays dead so the model can see it, rather than the preview silently
 "navigating" somewhere.
 
+## Watching the project folder
+
+A bound folder is watched with the OS's own filesystem notifications (`notify`:
+ReadDirectoryChangesW, FSEvents, inotify), so an edit made in another editor lands
+in the open task.
+
+Raw notifications need two things before they are useful, and both are in
+`src-tauri/folder_watch.rs`:
+
+- **Debouncing.** One save is a create, a write, a rename and a metadata touch.
+  Events are collected and reported once the tree has been quiet for 400ms, so a
+  burst costs one re-read instead of four.
+- **Filtering.** Access events are dropped (opening a file is not a change to it),
+  and the same directories the importer skips — `node_modules`, `dist`, `.git` —
+  are ignored here, so a build or a `git status` does not wake the app.
+
+A cheap tree fingerprint is still checked before reporting: the net effect of a
+burst is often nothing (a `touch`, or a file written and then deleted), and
+re-reading the project for that would be pure noise.
+
+`cargo test` covers the filtering and debouncing rules, and
+`src-tauri/tests/watcher_integration.rs` checks against the real OS backend that a
+file written in a watched directory — including one in a directory created after
+the watch started — actually produces an event.
+
 ## Scripts
 
 | Command | What it does |
