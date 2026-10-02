@@ -79,7 +79,7 @@ export type StepHandlers = {
   /** A complete tool call the model wants executed. */
   onToolCall?: (call: ToolCall) => void
   /** Exact token usage, when the provider reports it. */
-  onUsage?: (totalTokens: number) => void
+  onUsage?: (totalTokens: number, split?: { input: number; output: number }) => void
   /** The proxy replied, but no model is configured. */
   onUnconfigured?: (message: string) => void
   onMeta?: (config: AgentConfig) => void
@@ -165,7 +165,7 @@ export async function streamStep(
           handlers.onMeta?.({ configured: true, model: event.model })
           break
         case 'usage':
-          handlers.onUsage?.(event.totalTokens)
+          handlers.onUsage?.(event.totalTokens, event.split)
           break
         case 'unconfigured':
           configured = false

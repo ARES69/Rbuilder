@@ -31,6 +31,14 @@ import {
 } from './lib/folderWatch'
 import { attachmentsToContext, type AttachmentMeta } from './lib/attachments'
 import type { Budget } from './lib/budget'
+import {
+  addSpend,
+  costOf,
+  splitTokens,
+  type CostResult,
+  type SessionSpend,
+} from './lib/pricing'
+import { EMPTY_SPEND } from './lib/pricing'
 import { runChecks, type ChecksResult } from './lib/checks'
 import { applyEdits, type EditBlock, type EditResolution } from './lib/edits'
 import { channelFor, PreviewInspector } from './lib/inspector'
@@ -88,6 +96,9 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   /** Live for the duration of one turn: how much time and token budget is left. */
   const [budget, setBudget] = useState<{ budget: Budget; wrappingUp: boolean } | null>(null)
+  /** Running cost of this session, plus what the last turn actually cost. */
+  const [spend, setSpend] = useState<SessionSpend>(EMPTY_SPEND)
+  const [lastCost, setLastCost] = useState<CostResult | null>(null)
   const [dockTab, setDockTab] = useState<DockTab>('files')
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [runningChecks, setRunningChecks] = useState(false)
@@ -596,6 +607,26 @@ export default function App() {
       setApproval((current) => (current?.status === 'pending' ? null : current))
       setCommandApproval((current) => (current?.status === 'pending' ? null : current))
 
+      /**
+       * Price the turn. The reported split is used when the provider sent one;
+       * otherwise the turn's token total is split by an explicit assumption, and
+       * `costOf` says so rather than implying the number is exact. A local model
+       * costs nothing and is reported as such — not as `$0.00`, which would read
+       * as a price rather than an absence of one.
+       */
+      const reported = result.usage.input + result.usage.output
+      const split =
+        reported > 0
+          ? result.usage
+          : splitTokens(result.budget.tokens)
+      const cost = costOf(
+        split,
+        activeProvider.model,
+        activeProvider.kind,
+      )
+      setLastCost(cost)
+      setSpend((current) => addSpend(current, cost))
+
       const content = pickReplyText({
         prose: result.prose,
         filesWritten: written.length,
@@ -1095,6 +1126,8 @@ export default function App() {
           messages={state.messages}
           busy={busy}
           budget={budget}
+          lastCost={lastCost}
+          spend={spend}
           configured={state.configured}
           mode={state.mode}
           plan={state.plan}

@@ -5,6 +5,7 @@ import { MessageList } from './MessageList'
 import { PlanPanel } from './PlanPanel'
 import { readAttachments, type AttachmentMeta } from '../lib/attachments'
 import type { Budget } from '../lib/budget'
+import type { CostResult, SessionSpend } from '../lib/pricing'
 import type { AgentMode, PlanItem } from '../lib/protocol'
 import type { ChatMessage } from '../lib/store'
 
@@ -12,6 +13,10 @@ type Props = {
   messages: ChatMessage[]
   busy: boolean
   budget: { budget: Budget; wrappingUp: boolean } | null
+  /** What the last turn cost, or null before the first one. */
+  lastCost: CostResult | null
+  /** Running total for this session. */
+  spend: SessionSpend
   configured: boolean | null
   mode: AgentMode
   plan: PlanItem[]
@@ -51,6 +56,8 @@ export function ChatPanel({
   messages,
   busy,
   budget,
+  lastCost,
+  spend,
   configured,
   mode,
   plan,
@@ -181,6 +188,8 @@ export function ChatPanel({
         busy={busy}
         budget={budget?.budget ?? null}
         wrappingUp={budget?.wrappingUp ?? false}
+        lastCost={lastCost}
+        spend={spend}
         reading={reading}
         attachments={attachments}
         onAttach={(files) => void attach(files)}

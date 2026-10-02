@@ -92,6 +92,12 @@ export type TurnResult = {
   /** True when the turn ended because the budget ran out, not because it was done. */
   spent: boolean
   budget: Budget
+  /**
+   * Input and output tokens across every step of this turn, when the provider
+   * reported the split. The two are billed at different rates, so the caller
+   * needs them apart to price the turn; without them it has to estimate.
+   */
+  usage: { input: number; output: number }
 }
 
 export async function runAgentTurn(
@@ -115,6 +121,12 @@ export async function runAgentTurn(
   /** Pairs that did not match, reported to the model on the next step. */
   let editFailures: EditFailure[] = []
   let budget = createBudget(input.limits)
+  /**
+   * Summed across steps, because a turn is many provider calls. Steps that only
+   * report a total contribute nothing here, and the caller knows to fall back
+   * to an estimate rather than billing a partial split as if it were complete.
+   */
+  let usage: { input: number; output: number } = { input: 0, output: 0 }
   let prose = ''
   let plan: PlanItem[] = []
   let configured = true
@@ -229,8 +241,9 @@ export async function runAgentTurn(
           hooks.onReply(prose, files)
         },
         onToolCall: (call) => calls.push(call),
-        onUsage: (totalTokens) => {
+        onUsage: (totalTokens, split) => {
           budget = noteUsage(budget, totalTokens)
+          if (split) usage = mergeUsage(usage, split)
           hooks.onBudget?.(budget, wrappingUp)
         },
         onMeta: (config) => hooks.onMeta?.(config),
@@ -407,6 +420,18 @@ export async function runAgentTurn(
     stopped,
     spent,
     budget,
+    usage,
+  }
+}
+
+/** Adds one step's reported split to the turn's running total. */
+function mergeUsage(
+  current: { input: number; output: number },
+  step: { input: number; output: number },
+): { input: number; output: number } {
+  return {
+    input: current.input + Math.max(0, step.input),
+    output: current.output + Math.max(0, step.output),
   }
 }
 

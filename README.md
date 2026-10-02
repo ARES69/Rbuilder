@@ -165,6 +165,20 @@ capped at 10 MB; upstream calls time out after 20s (envelope can raise to 60s).
   cap. Anything stronger needs a container.
 - The agent has no shell tool: it can run the checks, not your machine.
 
+## Cost
+
+The composer shows what the last turn cost next to the model picker, since that
+is where the decision is made. A running total for the session appears after a
+few turns.
+
+Money is only shown when it is known. A model missing from the price table reads
+as "цена неизвестна", a local model reads as free, and a provider that reports
+no usage says so — none of them show `$0.00`, which would read as free rather
+than as an absence of a number. Input and output tokens are billed at their own
+rates, because they differ by up to 40× and an agent turn is input-heavy.
+
+Prices are a dated snapshot in `src/lib/pricing.ts`; they go stale.
+
 ## Scripts
 
 | Command | What it does |
