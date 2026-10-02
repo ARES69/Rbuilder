@@ -179,6 +179,21 @@ rates, because they differ by up to 40× and an agent turn is input-heavy.
 
 Prices are a dated snapshot in `src/lib/pricing.ts`; they go stale.
 
+## Multi-page projects
+
+A project with several HTML files gets a page picker next to the preview
+controls. Because the preview is a `srcdoc` document it has no URL of its own,
+so a link to `about.html` cannot simply be followed: it would resolve against
+the parent and take the whole app with it. Instead a small router injected into
+the document intercepts links to other pages of the same project, and the pane
+rebuilds the frame for the target page. The URL fragment tracks the page, so a
+reload lands in the same place.
+
+Links are left alone when they are not ours to handle: a same-document anchor, an
+external URL, and a link to a file that does not exist. That last one matters —
+a dead link stays dead so the model can see it, rather than the preview silently
+"navigating" somewhere.
+
 ## Scripts
 
 | Command | What it does |

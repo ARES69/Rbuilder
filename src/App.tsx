@@ -53,6 +53,7 @@ import {
   type ProjectFileInput,
 } from './lib/project'
 import { RUNTIME_SCRIPT } from './lib/previewRuntime'
+import { previewPages, resolveEntryPage } from './lib/pages'
 import { planBundle } from './lib/previewBundle'
 import { previewBundler } from './lib/previewCompiler'
 import {
@@ -997,6 +998,19 @@ export default function App() {
 
   const [previewDoc, setPreviewDoc] = useState<string>('')
   const [previewBundleError, setPreviewBundleError] = useState<string | null>(null)
+  /** The page on screen in a multi-page project; null until one is chosen. */
+  const [previewPage, setPreviewPage] = useState<string | null>(null)
+  /** The project's pages, and their paths: the router needs both. */
+  const pageLinks = useMemo(() => previewPages(state.project.files), [state.project.files])
+  const pagePaths = useMemo(() => pageLinks.map((entry) => entry.path), [pageLinks])
+
+  /**
+   * A page the agent deleted must not stay selected: the picker would offer a
+   * file that is gone, and the preview would keep rendering the stale copy.
+   */
+  useEffect(() => {
+    if (previewPage && !pagePaths.includes(previewPage)) setPreviewPage(null)
+  }, [previewPage, pagePaths])
 
   // The preview needs the API address of the desktop shell: its generated apps
   // call `/api/proxy` from an opaque origin, where a relative URL means nothing.
@@ -1004,7 +1018,17 @@ export default function App() {
   // projects take the synchronous path and never wait for the compiler.
   useEffect(() => {
     let cancelled = false
-    const injection = { channel, script: RUNTIME_SCRIPT, apiBase: apiBase() }
+    const page =
+      previewPage && pagePaths.some((entry) => entry === previewPage)
+        ? previewPage
+        : resolveEntryPage(state.project.files, window.location.hash)
+    const injection = {
+      channel,
+      script: RUNTIME_SCRIPT,
+      apiBase: apiBase(),
+      page: page ?? undefined,
+      pages: pagePaths,
+    }
     const plan = planBundle(state.project.files)
 
     if (plan.entries.length === 0) {
@@ -1038,7 +1062,9 @@ export default function App() {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [state.project, channel])
+    // `previewPage` is a dependency on purpose: picking another page has to
+    // rebuild the document, which is the whole point of having pages.
+  }, [state.project, channel, previewPage, pagePaths])
   const filePaths = useMemo(() => projectFilePaths(state.project), [state.project])
   const indexReady = useMemo(() => hasIndex(state.project), [state.project])
 
@@ -1168,6 +1194,7 @@ export default function App() {
         channel={channel}
         filePaths={filePaths}
         hasIndex={indexReady}
+        pages={pageLinks}
         inspector={inspector}
         dockTab={dockTab}
         onDockTabChange={setDockTab}

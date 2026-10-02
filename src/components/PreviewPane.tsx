@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { Dock, type DockTab } from './Dock'
 import type { ChecksResult } from '../lib/checks'
 import type { PreviewInspector } from '../lib/inspector'
+import type { PageLink } from '../lib/pages'
 import type { Project } from '../lib/project'
 import type { TerminalLine } from '../lib/store'
 
@@ -19,6 +20,8 @@ type Props = {
   /** The bound project folder, so the Git panel reads the real repository. */
   folder: string | null
   hasIndex: boolean
+  /** Every page in the project; more than one means a page picker is shown. */
+  pages: PageLink[]
   inspector: PreviewInspector
   tab: DockTab
   onTabChange: (tab: DockTab) => void
@@ -38,6 +41,11 @@ export function PreviewPane(props: Props) {
   const { document, files, hasIndex, inspector, channel } = props
   const [version, setVersion] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
+  /**
+   * Which page of a multi-page project is on screen. Null for a single-page one,
+   * where the question does not arise.
+   */
+  const [page, setPage] = useState<string | null>(null)
 
   // Re-render when the inspector records an event, so badges stay live.
   const [, force] = useReducer((count: number) => count + 1, 0)
@@ -48,6 +56,26 @@ export function PreviewPane(props: Props) {
   }, [document])
 
   useEffect(() => inspector.subscribe(force), [inspector])
+
+  /**
+   * The router inside the preview posts the page it wants. A link click in the
+   * rendered app is then a navigation the pane answers, rather than a link that
+   * resolves against the parent document and takes the whole app with it.
+   *
+   * The channel is checked: a replaced frame can still have a message in flight,
+   * and switching pages because a stale frame asked to is how the preview ends
+   * up somewhere the user never clicked.
+   */
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { source?: string; channel?: string; type?: string; path?: string }
+      if (!data || data.source !== 'freebuff' || data.channel !== channel) return
+      if (data.type !== 'page' || typeof data.path !== 'string') return
+      setPage(data.path)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [channel])
 
   // Tells the inspector which document is current the moment a rebuild starts.
   useEffect(() => {
@@ -106,6 +134,19 @@ export function PreviewPane(props: Props) {
             onClick={openInNewTab}
             disabled={!hasIndex}
             title="Открыть предпросмотр в новой вкладке">Открыть</button>
+          {props.pages.length > 1 ? (
+            <select
+              className="page-picker"
+              value={page ?? props.pages[0]?.path ?? ''}
+              onChange={(event) => setPage(event.target.value)}
+              aria-label="Страница превью"
+              title="Страница превью"
+            >
+              {props.pages.map((entry) => (
+                <option key={entry.path} value={entry.path}>{entry.label}</option>
+              ))}
+            </select>
+          ) : null}
         </div>
       </header>
 
