@@ -2,15 +2,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { summarizeChecks, type ChecksResult } from '../lib/checks'
 import {
   changeLabel,
+  gitCheckoutCommand,
   gitCommitCommand,
+  gitTagCommand,
   gitTone,
   GIT_INIT_COMMAND,
+  GIT_PULL_COMMAND,
+  GIT_PUSH_COMMAND,
   notifyGitChanged,
+  readGitDiff,
+  readGitExtra,
   readGitState,
   runGit,
+  type DiffLine,
+  type GitExtra,
   type GitState,
 } from '../lib/git'
 import type { PreviewEvent, PreviewInspector } from '../lib/inspector'
+import type { GitChange } from '../lib/git'
 import type { Project, ProjectFile } from '../lib/project'
 import type { TerminalLine } from '../lib/store'
 
@@ -19,6 +28,15 @@ export type DockTab = 'files' | 'git' | 'console' | 'checks' | 'terminal'
 export type DockProps = {
   project: Project
   baselineProject: Project
+  /**
+   * The bound project folder, when there is one.
+   *
+   * The Git panel needs it because without a `cwd` the exec route materializes
+   * the project into the scratch copy (`.freebuff-workspace/project`), so the
+   * panel would report on a temporary tree while the sidebar reported on the
+   * real folder. Two halves of one panel, two different repositories.
+   */
+  folder: string | null
   tab: DockTab
   onTabChange: (tab: DockTab) => void
   inspector: PreviewInspector
@@ -189,11 +207,22 @@ function changedFiles(project: Project, baseline: Project): { path: string; stat
  * be verified outside the app. It also lists how the project differs from the
  * state it was imported in, which is useful before the repository exists.
  */
-function GitPanel({ project, baselineProject }: DockProps) {
+function GitPanel({ project, baselineProject, folder }: DockProps) {
   const [state, setState] = useState<GitState | null>(null)
+  const [extra, setExtra] = useState<GitExtra | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [tagName, setTagName] = useState('')
+  const [branchName, setBranchName] = useState('')
   const [note, setNote] = useState<string | null>(null)
+  /** Which file's diff is open, if any. */
+  const [diffPath, setDiffPath] = useState<string | null>(null)
+  const [diff, setDiff] = useState<DiffLine[] | null>(null)
+  /** Keeps the async diff read from landing after the user picked another file. */
+  const diffRequest = useRef(0)
+  /** Read in callbacks so a refresh after an async command sees the newest folder. */
+  const folderRef = useRef<string | null>(folder)
+  folderRef.current = folder
 
   const files = useMemo(
     () => project.files.map((file) => ({ path: file.path, content: file.content })),
@@ -203,11 +232,16 @@ function GitPanel({ project, baselineProject }: DockProps) {
 
   const refresh = useCallback(async () => {
     setBusy(true)
-    const next = await readGitState(files)
+    const cwd = folderRef.current ?? undefined
+    const [next, extra] = await Promise.all([
+      readGitState(files, undefined, cwd),
+      readGitExtra(files, undefined, cwd),
+    ])
     setState(next)
+    setExtra(extra)
     setBusy(false)
     notifyGitChanged()
-  }, [files])
+  }, [files, folder])
 
   useEffect(() => {
     void refresh()
@@ -217,19 +251,53 @@ function GitPanel({ project, baselineProject }: DockProps) {
     async (command: string, successNote: string) => {
       setBusy(true)
       setNote(null)
-      const result = await runGit(command, files)
-      setNote(result.ok ? successNote : result.error ?? 'Не удалось выполнить git-команду.')
-      const next = await readGitState(files)
+      const cwd = folderRef.current ?? undefined
+      const result = await runGit(command, files, undefined, cwd)
+      // push and pull print their own diagnostics on stdout, and they are the
+      // only useful part of the result, so a failure shows git's message.
+      const detail = result.output.trim()
+      setNote(
+        result.ok
+          ? successNote
+          : detail || result.error || 'Не удалось выполнить git-команду.',
+      )
+      const [next, extra] = await Promise.all([
+        readGitState(files, undefined, cwd),
+        readGitExtra(files, undefined, cwd),
+      ])
       setState(next)
+      setExtra(extra)
       setBusy(false)
       notifyGitChanged()
     },
-    [files],
+    [files, folder],
   )
 
   const tone = gitTone(state)
   const branch = state?.branch ?? null
   const changeCount = state?.changes.length ?? 0
+
+  /**
+   * Opens a file's diff. A deleted path has nothing left to diff against, so
+   * the panel says so instead of showing an empty block that looks like a bug.
+   */
+  const openDiff = useCallback(
+    async (entry: GitChange) => {
+      if (entry.index === 'D' || entry.worktree === 'D') {
+        setDiffPath(entry.path)
+        setDiff([])
+        return
+      }
+      const request = ++diffRequest.current
+      setDiffPath(entry.path)
+      setDiff(null)
+      const lines = await readGitDiff(files, entry.path, undefined, folderRef.current ?? undefined)
+      // A newer click already started; its result is the one that counts.
+      if (request !== diffRequest.current) return
+      setDiff(lines)
+    },
+    [files],
+  )
 
   return (
     <div className="git-panel">
@@ -269,6 +337,24 @@ function GitPanel({ project, baselineProject }: DockProps) {
             >
               Зафиксировать
             </button>
+            <button
+              type="button"
+              className="button button--quiet"
+              disabled={busy || !extra?.remote}
+              title={extra?.remote ? `Отправить в ${extra.remote}` : 'У репозитория нет remote origin'}
+              onClick={() => void run(GIT_PUSH_COMMAND, 'Отправлено в origin.')}
+            >
+              Push
+            </button>
+            <button
+              type="button"
+              className="button button--quiet"
+              disabled={busy || !extra?.remote}
+              title={extra?.remote ? 'Обновить из origin' : 'У репозитория нет remote origin'}
+              onClick={() => void run(GIT_PULL_COMMAND, 'Получено из origin.')}
+            >
+              Pull
+            </button>
           </>
         )}
       </div>
@@ -283,10 +369,55 @@ function GitPanel({ project, baselineProject }: DockProps) {
 
       {tone === 'missing' ? (
         <p className="dock-note">
-          Терминал работает в копии проекта (<code>.freebuff-workspace/project</code>). Создайте
-          репозиторий, чтобы фиксировать контрольные точки этой копии — приложение при этом не трогает
-          ваш собственный git-репозиторий.
+          {folder
+            ? 'Папка проекта ещё не под git. Создайте репозиторий прямо в ней — терминал и панель будут работать с ним.'
+            : 'Задача не привязана к папке: терминал работает в копии проекта (.freebuff-workspace/project). Привяжите папку, чтобы git работал с вашим настоящим репозиторием.'}
         </p>
+      ) : null}
+
+      {extra?.tracking ? (
+        <p className="dock-note">
+          Отслеживает <code>{extra.tracking}</code>
+          {extra.outOfSync ? ' · расхождение с удалённой веткой' : ''}
+        </p>
+      ) : null}
+
+      {extra?.branches.length ? (
+        <div className="git-branches">
+          <span className="git-section-label">Ветки</span>
+          <div className="git-branch-row">
+            {extra.branches.map((name) => (
+              <button
+                key={name}
+                type="button"
+                className={`git-branch${name === branch ? ' git-branch--current' : ''}`}
+                disabled={busy || name === branch}
+                title={name === branch ? 'Текущая ветка' : `Переключиться на ${name}`}
+                onClick={() => void run(gitCheckoutCommand(name), `Переключено на ${name}.`)}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+          <input
+            className="input git-message"
+            value={branchName}
+            placeholder="Имя новой ветки"
+            onChange={(event) => setBranchName(event.target.value)}
+          />
+          <button
+            type="button"
+            className="button button--quiet"
+            disabled={busy || !branchName.trim()}
+            onClick={() => {
+              const target = branchName.trim()
+              void run(gitCheckoutCommand(target), `Создана ветка ${target}.`)
+              setBranchName('')
+            }}
+          >
+            Новая ветка
+          </button>
+        </div>
       ) : null}
 
       {changeCount > 0 ? (
@@ -294,10 +425,98 @@ function GitPanel({ project, baselineProject }: DockProps) {
           {state?.changes.map((change) => (
             <li key={`${change.path}-${change.index}${change.worktree}`} className="git-item">
               <span className={`git-status git-status--${changeLabel(change)}`}>{changeLabel(change)}</span>
-              <span>{change.path}</span>
+              <button
+                type="button"
+                className="git-file"
+                onClick={() => void openDiff(change)}
+                title="Показать изменения относительно HEAD"
+              >
+                {change.path}
+              </button>
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {diffPath ? (
+        <div className="git-diff">
+          <div className="git-diff-head">
+            <code>{diffPath}</code>
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={() => {
+                // Bump the request so a pending read cannot reopen the closed file.
+                diffRequest.current += 1
+                setDiffPath(null)
+                setDiff(null)
+              }}
+            >
+              Закрыть
+            </button>
+          </div>
+          {diff === null ? (
+            <p className="dock-note">Читаем изменения…</p>
+          ) : diff.length === 0 ? (
+            <p className="dock-note">
+              Нет изменений относительно HEAD{state?.branch ? '' : ' (коммитов ещё нет)'}.
+            </p>
+          ) : (
+            <pre className="git-diff-body">
+              {diff.map((line, index) => (
+                <span key={index} className={`git-diff-line git-diff-line--${line.kind}`}>
+                  {line.text}
+                </span>
+              ))}
+            </pre>
+          )}
+        </div>
+      ) : null}
+
+      {extra?.commits.length ? (
+        <div className="git-log">
+          <span className="git-section-label">История</span>
+          <ul className="git-list">
+            {extra.commits.map((commit) => (
+              <li key={commit.hash} className="git-item">
+                <code className="git-hash">{commit.hash}</code>
+                <span className="git-subject">{commit.subject}</span>
+                <span className="git-author">
+                  {commit.author} · {commit.date}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {extra?.tags.length ? (
+        <div className="git-tags">
+          <span className="git-section-label">Теги</span>
+          <div className="git-branch-row">
+            {extra.tags.map((name) => (
+              <span key={name} className="git-branch">{name}</span>
+            ))}
+          </div>
+          <input
+            className="input git-message"
+            value={tagName}
+            placeholder="Имя тега"
+            onChange={(event) => setTagName(event.target.value)}
+          />
+          <button
+            type="button"
+            className="button button--quiet"
+            disabled={busy || !tagName.trim()}
+            onClick={() => {
+              const name = tagName.trim()
+              void run(gitTagCommand(name), `Тег ${name} создан.`)
+              setTagName('')
+            }}
+          >
+            Создать тег
+          </button>
+        </div>
       ) : null}
 
       {changeCount === 0 && tone !== 'missing' ? (

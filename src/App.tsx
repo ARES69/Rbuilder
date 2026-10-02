@@ -1129,6 +1129,7 @@ export default function App() {
         onTabChange={setInspectorTab}
         project={state.project}
         baselineProject={baselineProject}
+        folder={workspace.metadata.localPath}
         document={previewDoc}
         bundleError={previewBundleError}
         channel={channel}
