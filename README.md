@@ -172,7 +172,23 @@ capped at 10 MB; upstream calls time out after 20s (envelope can raise to 60s).
 | `pnpm dev` | Dev server with the `/api/chat` and `/api/exec` middleware (the supported way to run it) |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm test` | Vitest: project, protocol, attachments, markdown, checks and the preview runtime |
+| `pnpm test:visual` | Screenshot tests for the preview pane (needs `pnpm exec playwright install chromium`) |
+| `pnpm test:visual:update` | Re-record the screenshot baselines after an intended visual change |
 | `pnpm build` | Production build of the front end (no API middleware) |
+
+### Preview screenshot tests
+
+`tests/visual/` renders what the preview actually shows: the same
+`buildPreviewDocument` output the app hands to its iframe, opened in Chromium,
+compared pixel by pixel against the committed baselines in `tests/visual/baselines/`.
+
+They are kept out of `pnpm test` on purpose — they need a browser and take
+seconds per shot, and nobody wants that inside the loop they run all day. CI runs
+them as their own step.
+
+When a change to the preview pipeline is intended, re-record the baselines with
+`pnpm test:visual:update` and review the PNGs in the diff. A failing run writes
+the frames it compared to `tests/visual/output/`, which is gitignored.
 
 ## Layout
 
