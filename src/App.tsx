@@ -16,6 +16,7 @@ import {
   readProjectFolder,
   readViaDirectoryHandle,
   revealInExplorer,
+  saveTextFile,
   writeProjectFiles,
   writeViaDirectoryHandle,
   type DirectoryHandle,
@@ -42,13 +43,21 @@ import { planBundle } from './lib/previewBundle'
 import { previewBundler } from './lib/previewCompiler'
 import {
   createWorkspace,
+  dedupeWorkspaces,
   projectFromWorkspaceFiles,
   readActiveWorkspaceId,
   readStoredWorkspaces,
-  rememberActiveWorkspace,
-  saveStoredWorkspaces,
   type Workspace,
 } from './lib/workspace'
+import { loadProjectSession, openProjectStore, type ProjectStore } from './lib/projectDb'
+import {
+  archiveFileName,
+  archiveToText,
+  createArchive,
+  parseArchive,
+  readFileAsText,
+  workspaceFromArchive,
+} from './lib/projectArchive'
 import { describeCall, executeTool, makeRunCommandHandler, type ToolOutcome } from './lib/tools'
 import { runAgentTurn } from './lib/turn'
 import type { AgentMode, ChatTurn } from './lib/protocol'
@@ -148,6 +157,12 @@ export default function App() {
   // reload made the workspace look unmodified and the diff had nothing to show.
   const [baselineProject, setBaselineProject] = useState<Project>(() => workspace.baseline)
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => readStoredWorkspaces(window.localStorage))
+  /** Where the tasks are kept: IndexedDB, or localStorage when that is unavailable. */
+  const [store, setStore] = useState<ProjectStore | null>(null)
+  const workspacesRef = useRef(workspaces)
+  const workspaceRef = useRef(workspace)
+  /** Hidden file input the archive import reads from. */
+  const archiveInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     folderRef.current = workspace.metadata.localPath
@@ -177,18 +192,84 @@ export default function App() {
   useEffect(() => saveState(state), [state])
 
   useEffect(() => {
+    workspacesRef.current = workspaces
+    workspaceRef.current = workspace
+  }, [workspaces, workspace])
+
+  /**
+   * Startup: open the project store and adopt whatever it already has. The
+   * localStorage copy is rendered first so the rail is never empty, then the
+   * real store takes over — and on a first run the visible tasks are written
+   * into it.
+   */
+  useEffect(() => {
+    let cancelled = false
+
+    void openProjectStore().then(async (opened) => {
+      if (cancelled) return
+      setStore(opened)
+
+      let session: Awaited<ReturnType<typeof loadProjectSession>>
+      try {
+        session = await loadProjectSession(opened)
+      } catch {
+        return
+      }
+      if (cancelled) return
+
+      if (session.workspaces.length === 0) {
+        await opened.replace(workspacesRef.current)
+        await opened.saveActiveId(workspaceRef.current.metadata.id)
+        return
+      }
+
+      const restored = dedupeWorkspaces(session.workspaces)
+      setWorkspaces(restored)
+      const active =
+        restored.find((entry) => entry.metadata.id === session.activeId) ??
+        restored.find((entry) => entry.metadata.id === workspaceRef.current.metadata.id) ??
+        restored[0]!
+      if (active.metadata.id === workspaceRef.current.metadata.id) return
+
+      projectRef.current = active.project
+      setBaselineProject(active.baseline)
+      setWorkspace(active)
+      dispatch({ type: 'project/set', project: active.project })
+    })
+
+    return () => {
+      cancelled = true
+    }
+    // Deliberately once: the store outlives every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
     const current = { ...workspace, project: state.project, metadata: { ...workspace.metadata, updatedAt: Date.now() } }
     setWorkspace((previous) => previous.project === state.project ? previous : current)
     setWorkspaces((entries) => {
       const next = entries.some((entry) => entry.metadata.id === current.metadata.id)
         ? entries.map((entry) => entry.metadata.id === current.metadata.id ? current : entry)
         : [current, ...entries].slice(0, 12)
-      saveStoredWorkspaces(window.localStorage, next)
       return next
     })
   }, [state.project])
 
-  useEffect(() => rememberActiveWorkspace(window.localStorage, workspace.metadata.id), [workspace.metadata.id])
+  // Writing is debounced: a turn that rewrites a dozen files is one save, not
+  // twelve database transactions.
+  useEffect(() => {
+    if (!store) return
+    const timer = window.setTimeout(() => {
+      void store.replace(workspaces).catch(() => {
+        /* the session keeps working in memory if the store refuses a write */
+      })
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [store, workspaces])
+
+  useEffect(() => {
+    void store?.saveActiveId(workspace.metadata.id)
+  }, [store, workspace.metadata.id])
 
   useEffect(() => {
     try {
@@ -650,6 +731,54 @@ export default function App() {
     }
   }, [inspector])
 
+  /** Writes the open task to a .rbuilder.json file the user can keep or send. */
+  const exportProject = useCallback(async () => {
+    const archive = createArchive(workspaceRef.current)
+    if (archive.files.length === 0) {
+      window.alert('В проекте пока нет файлов.')
+      return
+    }
+    try {
+      const result = await saveTextFile(
+        archiveFileName(archive.name, archive.exportedAt),
+        archiveToText(archive),
+      )
+      if (!result.saved) window.alert('Файл не сохранён.')
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось сохранить проект.')
+    }
+  }, [])
+
+  const importProject = useCallback(async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const parsed = parseArchive(await readFileAsText(file))
+      if (!parsed.ok) {
+        window.alert(parsed.error)
+        return
+      }
+
+      const imported = workspaceFromArchive(parsed.archive)
+      // Two archives of the same project must stay two tasks.
+      const taken = new Set(workspacesRef.current.map((entry) => entry.metadata.name))
+      if (taken.has(imported.metadata.name)) {
+        let index = 2
+        while (taken.has(`${imported.metadata.name} (${index})`)) index += 1
+        imported.metadata.name = `${imported.metadata.name} (${index})`
+      }
+
+      setWorkspaces((entries) => [imported, ...entries].slice(0, 12))
+      workspaceRef.current = imported
+      projectRef.current = imported.project
+      setBaselineProject(imported.baseline)
+      setWorkspace(imported)
+      dispatch({ type: 'project/set', project: imported.project })
+      inspector.clear()
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось открыть архив проекта.')
+    }
+  }, [inspector])
+
   const openLocalFolder = useCallback(async () => {
     // The desktop shell reads the folder natively: WebView2 has no File System
     // Access API, so the browser path below cannot work there.
@@ -854,6 +983,8 @@ export default function App() {
         onOpenWorkspace={() => { setActiveNav('workspace'); setView('workspace') }}
         onImportFolder={() => void openLocalFolder()}
         onOpenProjects={() => { setActiveNav('projects'); setView('projects') }}
+        onExportProject={() => void exportProject()}
+        onImportArchive={() => archiveInputRef.current?.click()}
       />
 
       <section className="zcode-chat" aria-label="Чат с агентом">
@@ -968,6 +1099,17 @@ export default function App() {
       />
 
       {browserSessionOpen ? <BrowserSessionPanel onClose={() => setBrowserSessionOpen(false)} /> : null}
+      <input
+        ref={archiveInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="visually-hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          void importProject(file)
+        }}
+      />
       {settingsOpen ? (
         <SettingsPanel
           profiles={providerList}

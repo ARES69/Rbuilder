@@ -20,6 +20,10 @@ type Props = {
   onOpenWorkspace: () => void
   onImportFolder: () => void
   onOpenProjects: () => void
+  /** Writes the open task to a .rbuilder.json file. */
+  onExportProject: () => void
+  /** Picks a .rbuilder.json and opens it as a new task. */
+  onImportArchive: () => void
 }
 
 /** One task row: active dot, clipped title, age on the right. */
@@ -58,6 +62,8 @@ export function TaskRail({
   onOpenWorkspace,
   onImportFolder,
   onOpenProjects,
+  onExportProject,
+  onImportArchive,
 }: Props) {
   const checkLine = checks ? summarizeChecks(checks) : 'проверки не запускались'
 
@@ -76,6 +82,26 @@ export function TaskRail({
         <button type="button" className="rail-action" onClick={onImportFolder} disabled={importing}>
           <span aria-hidden="true">◇</span> {importing ? 'Импорт…' : 'Open Folder'}
         </button>
+        <div className="rail-pair">
+          <button
+            type="button"
+            className="rail-action rail-action--half"
+            onClick={onExportProject}
+            disabled={busy}
+            title="Сохранить проект в файл .rbuilder.json"
+          >
+            <span aria-hidden="true">⤓</span> Export
+          </button>
+          <button
+            type="button"
+            className="rail-action rail-action--half"
+            onClick={onImportArchive}
+            disabled={busy || importing}
+            title="Открыть проект из файла .rbuilder.json"
+          >
+            <span aria-hidden="true">⤒</span> Import
+          </button>
+        </div>
       </div>
 
       <div className="rail-group">
