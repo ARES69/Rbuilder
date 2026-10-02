@@ -9,6 +9,8 @@ export type { DockTab }
 
 type Props = {
   document: string
+  /** A compile that failed, shown above the preview instead of inside it. */
+  bundleError?: string | null
   /** Channel the injected runtime answers on; changes with every rebuild. */
   channel: string
   files: string[]
@@ -105,8 +107,14 @@ export function PreviewPane(props: Props) {
         </div>
       </header>
 
+      {props.bundleError ? (
+        <p className="preview-bundle-error" role="alert">
+          Сборка не удалась: {props.bundleError}
+        </p>
+      ) : null}
+
       <div className="preview-frame">
-        {hasIndex ? (
+        {hasIndex && document ? (
           <iframe
             key={version}
             ref={attachFrame}
@@ -117,11 +125,22 @@ export function PreviewPane(props: Props) {
           />
         ) : (
           <div className="preview-empty">
-            <p className="empty-eyebrow">Нет index.html</p>
-            <p className="empty-lede">
-              Попросите RBUILDER создать веб-приложение — оно появится здесь. Предпросмотр отображает
-              текущее содержимое проекта.
-            </p>
+            {hasIndex ? (
+              <>
+                <p className="empty-eyebrow">Собираю превью</p>
+                <p className="empty-lede">
+                  Проект на TypeScript или JSX компилируется перед показом — это занимает секунду.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="empty-eyebrow">Нет index.html</p>
+                <p className="empty-lede">
+                  Попросите RBUILDER создать веб-приложение — оно появится здесь. Предпросмотр
+                  отображает текущее содержимое проекта.
+                </p>
+              </>
+            )}
           </div>
         )}
       </div>
