@@ -6,7 +6,8 @@ import {
   gitCommitCommand,
   gitTagCommand,
   gitTone,
-  GIT_INIT_COMMAND,
+  gitInitCommand,
+  isGitUsable,
   GIT_PULL_COMMAND,
   GIT_PUSH_COMMAND,
   notifyGitChanged,
@@ -278,6 +279,31 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
   const changeCount = state?.changes.length ?? 0
 
   /**
+   * Git only makes sense against the bound folder.
+   *
+   * Without one the commands run in a scratch copy that is rewritten on every
+   * command, so a repository created there is thrown away with the next run, and
+   * until then the panel reports a branch and a history belonging to nothing.
+   * Offering the actions would let the user commit work into a directory that
+   * does not exist by tomorrow, so the panel says what is missing instead.
+   */
+  if (!isGitUsable(folderRef.current)) {
+    return (
+      <div className="git-panel">
+        <p className="dock-note">
+          Задача не привязана к папке, поэтому git здесь не работает: терминал выполняется во
+          временной копии проекта (<code>.freebuff-workspace/project</code>), которая
+          перезаписывается при каждой команде. Репозиторий в такой папке исчезнет вместе с ней.
+        </p>
+        <p className="dock-note">
+          Привяжите задачу к папке — и панель будет работать с вашим настоящим репозиторием:
+          статус, diff, история, ветки и push.
+        </p>
+      </div>
+    )
+  }
+
+  /**
    * Opens a file's diff. A deleted path has nothing left to diff against, so
    * the panel says so instead of showing an empty block that looks like a bug.
    */
@@ -317,7 +343,10 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
             type="button"
             className="button"
             disabled={busy}
-            onClick={() => void run(GIT_INIT_COMMAND, 'Репозиторий создан.')}
+            onClick={() => {
+              const command = gitInitCommand(folderRef.current)
+              if (command) void run(command, 'Репозиторий создан.')
+            }}
           >
             Создать репозиторий
           </button>

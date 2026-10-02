@@ -194,6 +194,19 @@ external URL, and a link to a file that does not exist. That last one matters â€
 a dead link stays dead so the model can see it, rather than the preview silently
 "navigating" somewhere.
 
+## Git
+
+The Git panel runs real `git` in the **bound project folder** â€” the same folder
+the model writes to and the terminal runs in, so what the panel reports can be
+verified outside the app. It gives status, a per-file diff, the recent history,
+branch switching and creation, tags, and push/pull.
+
+A task with no bound folder gets no Git panel. Its commands run in the scratch
+copy at `.freebuff-workspace/project`, which is rewritten from scratch on every
+command: a repository created there would be thrown away with the next run, and
+until then the panel would report a branch and a history belonging to nothing.
+The panel says so instead of offering the actions.
+
 ## Watching the project folder
 
 A bound folder is watched with the OS's own filesystem notifications (`notify`:

@@ -5,12 +5,34 @@ import {
   gitCheckoutCommand,
   gitCommitCommand,
   gitDiffCommand,
+  gitInitCommand,
   gitTagCommand,
   gitTone,
+  isGitUsable,
   parseGitExtra,
   parseGitState,
   parseUnifiedDiff,
 } from '../src/lib/git'
+
+describe('git initialization', () => {
+  it('creates a repository in the folder the task is bound to', () => {
+    expect(gitInitCommand('C:/work/site')).toBe('git init -q -b main 2>/dev/null || git init -q')
+    expect(isGitUsable('C:/work/site')).toBe(true)
+  })
+
+  it('refuses to create one for an unbound task', () => {
+    // Without a folder the command would run in `.freebuff-workspace/project`,
+    // which is rewritten on every command. The repository would vanish with the
+    // next run, and until then the panel reports a branch that owns nothing.
+    expect(gitInitCommand(null)).toBeNull()
+    expect(isGitUsable(null)).toBe(false)
+  })
+
+  it('does not treat an empty folder as bound', () => {
+    expect(gitInitCommand('')).toBeNull()
+    expect(isGitUsable('')).toBe(false)
+  })
+})
 
 describe('git state parsing', () => {
   it('reads branch, changes and last commit out of one command', () => {

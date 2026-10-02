@@ -44,8 +44,25 @@ export const GIT_STATE_COMMAND = [
   'else echo RB_NO_REPO; fi',
 ].join(' ')
 
-export const GIT_INIT_COMMAND =
-  'git init -q -b main 2>/dev/null || git init -q'
+/**
+ * The command that creates a repository, or `null` when there is nowhere to
+ * create one.
+ *
+ * A task with no bound folder runs its commands in the scratch copy at
+ * `.freebuff-workspace/project`, which is rewritten from scratch on every
+ * command. A repository created there is thrown away with the next run — and
+ * until then it makes the panel report a branch and a history that belong to
+ * nothing, which is exactly the state this returns null to prevent.
+ */
+export function gitInitCommand(folder: string | null): string | null {
+  if (!folder) return null
+  return 'git init -q -b main 2>/dev/null || git init -q'
+}
+
+/** True when git actions are worth offering at all: only against a real folder. */
+export function isGitUsable(folder: string | null): boolean {
+  return Boolean(folder)
+}
 
 /**
  * The rest of the panel's state in one round trip, behind the same `.git`
