@@ -3,6 +3,8 @@
  * that turns it into a single document the preview iframe can render.
  */
 
+import { pageRouterScript } from './pages'
+
 export type ProjectFile = { path: string; content: string }
 export type Project = { files: ProjectFile[] }
 export type ProjectFileInput = { path: string; content: string }
@@ -133,6 +135,10 @@ export type PreviewInjection = {
   bundles?: Record<string, string>
   /** A compile that failed: shown in the preview instead of failing silently. */
   bundleError?: { entry: string; error: string } | null
+  /** The page being shown, when the project has more than one. */
+  page?: string
+  /** Every page in the project, so the router knows what it may navigate to. */
+  pages?: string[]
 }
 
 /**
@@ -143,7 +149,17 @@ export type PreviewInjection = {
  */
 export function buildPreviewDocument(project: Project, injection?: PreviewInjection): string {
   const files = project.files
-  const index = files.find((file) => file.path.toLowerCase() === INDEX_PATH)
+  /**
+   * A multi-page project shows whichever page was asked for; a single-page one
+   * still keys off index.html, so nothing changes for the common case. When the
+   * requested page is gone (the agent renamed it) the lookup falls through to
+   * index.html and then to the fallback listing.
+   */
+  const requested = injection?.page ? files.find((file) => file.path === injection.page) : undefined
+  const index =
+    requested ??
+    files.find((file) => file.path.toLowerCase() === INDEX_PATH) ??
+    files.find((file) => /\.html?$/i.test(file.path))
   if (!index) return fallbackDocument(files)
 
   // Some models write self-closing script tags; normalize so the regex below matches.
@@ -184,7 +200,7 @@ function injectRuntime(html: string, injection: PreviewInjection): string {
     ? `<script>window.__freebuffApiBase=${JSON.stringify(injection.apiBase)};</script>\n`
     : ''
   const snippet = `<script>window.__freebuffChannel=${JSON.stringify(injection.channel)};</script>
-${apiBase}<script>${injection.script}</script>${bundleNotice(injection)}`
+${apiBase}<script>${injection.script}</script>${pageRouter(injection)}${bundleNotice(injection)}`
 
   const head = /<head[^>]*>/i.exec(html)
   if (head) {
@@ -199,6 +215,22 @@ ${apiBase}<script>${injection.script}</script>${bundleNotice(injection)}`
   }
 
   return `${snippet}\n${html}`
+}
+
+/**
+ * The multi-page router, and only for a project that has more than one page.
+ *
+ * The script runs before the app's own code so a link clicked during startup is
+ * already intercepted. It is skipped for single-page projects: a router that
+ * can navigate nowhere would only be able to break a working preview.
+ */
+function pageRouter(injection: PreviewInjection): string {
+  const pages = injection.pages ?? []
+  if (pages.length < 2) return ''
+  const setup = `<script>window.__freebuffPreviewPages=${JSON.stringify(pages)};window.__freebuffPreviewPage=${JSON.stringify(
+    injection.page ?? pages[0]!,
+  )};</script>\n`
+  return `${setup}<script>${pageRouterScript()}</script>\n`
 }
 
 /**

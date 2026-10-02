@@ -3,6 +3,7 @@ import type { ChecksResult } from '../lib/checks'
 import { lineDiff, totalDiff } from '../lib/diff'
 import { fileGlyph, fileGlyphClass } from '../lib/fileIcons'
 import type { PreviewInspector } from '../lib/inspector'
+import type { PageLink } from '../lib/pages'
 import type { Project } from '../lib/project'
 import type { PlanItem } from '../lib/protocol'
 import type { TerminalLine } from '../lib/store'
@@ -19,6 +20,8 @@ type Props = {
   onTabChange: (tab: InspectorTab) => void
   project: Project
   baselineProject: Project
+  /** Pages of a multi-page project, passed through to the preview. */
+  pages: PageLink[]
   /** The bound project folder, passed through to the Git panel. */
   folder: string | null
   document: string
@@ -202,6 +205,7 @@ export function InspectorPanel(props: Props) {
             baselineProject={props.baselineProject}
             folder={props.folder}
             hasIndex={props.hasIndex}
+            pages={props.pages}
             inspector={props.inspector}
             tab={props.dockTab}
             onTabChange={props.onDockTabChange}

@@ -52,7 +52,21 @@ afterAll(async () => {
   await browser?.close()
 })
 
-type Fixture = { name: string; project: Project; expectText?: string }
+type Fixture = {
+  name: string
+  project: Project
+  expectText?: string
+  /**
+   * The page to ask the builder for, and a link to click before the shot. A
+   * multi-page preview has to survive a real click on a real anchor: the router
+   * is injected source text, and jsdom cannot say whether it intercepts before
+   * the browser navigates the whole app away.
+   */
+  page?: string
+  pages?: string[]
+  clickId?: string
+  expectAfterClick?: string
+}
 
 /**
  * The fixtures are deliberately small and self-contained. Each one covers a
@@ -130,15 +144,54 @@ function fixtures(): Fixture[] {
         files: [file('notes.md', '# Not a site\n\nThe preview shows a file list.')],
       },
     },
+    {
+      name: 'multi-page-navigation',
+      project: {
+        files: [
+          file(
+            'index.html',
+            [
+              '<!doctype html>',
+              '<html><head><link rel="stylesheet" href="styles.css"></head>',
+              '<body><h1>Home</h1><a id="go" href="about.html">About us</a></body></html>',
+            ].join('\n'),
+          ),
+          file(
+            'about.html',
+            [
+              '<!doctype html>',
+              '<html><head><link rel="stylesheet" href="styles.css"></head>',
+              '<body><h1>About us</h1><p>This is the second page of the site.</p></body></html>',
+            ].join('\n'),
+          ),
+          file(
+            'styles.css',
+            [
+              'body { margin: 0; padding: 24px; font-family: sans-serif; background: #0f172a; color: #e2e8f0; }',
+              'h1 { margin: 0 0 12px; font-size: 26px; }',
+              'a { color: #38bdf8; }',
+            ].join('\n'),
+          ),
+        ],
+      },
+      page: 'index.html',
+      pages: ['index.html', 'about.html'],
+      clickId: 'go',
+      // If the browser had navigated instead of the router, the document would
+      // be gone and this text would not be here at all.
+      expectAfterClick: 'This is the second page',
+    },
   ]
 }
 
-async function render(project: Project, fixtureName: string): Promise<Buffer> {
+async function render(fixture: Fixture): Promise<Buffer> {
   // The same runtime the app injects, minus the host channel: nothing here
   // posts back, and a channel that never answers would only add noise.
-  const document = buildPreviewDocument(project, {
-    channel: `visual-${fixtureName}`,
+  const document = buildPreviewDocument(fixture.project, {
+    channel: `visual-${fixture.name}`,
     script: '',
+    page: fixture.page,
+    pages: fixture.pages,
   })
 
   await page.setContent(document, { waitUntil: 'load' })
@@ -150,6 +203,43 @@ async function render(project: Project, fixtureName: string): Promise<Buffer> {
   // variable in the page.
   await page.evaluate('document.fonts ? document.fonts.ready.then(() => true) : true')
   await page.waitForTimeout(120)
+
+  if (fixture.clickId) {
+    // Navigation has two halves and the visual fixture needs both: the router in
+    // the page posts the page it wants, and the preview pane is what answers by
+    // rebuilding the document. Modelling only the first half would show the old
+    // page still on screen, which is the pane's job to fix rather than the
+    // router's.
+    await page.evaluate(
+      `window.__requestedPage = null
+       window.addEventListener('message', (event) => {
+         const data = event.data
+         if (data && data.source === 'freebuff' && data.type === 'page') {
+           window.__requestedPage = data.path
+         }
+       })`,
+    )
+    await page.click(`#${fixture.clickId}`)
+    await page.waitForTimeout(120)
+
+    const requested = (await page.evaluate('window.__requestedPage')) as string | null
+    expect(
+      requested,
+      `${fixture.name}: the router did not report a page navigation`,
+    ).not.toBeNull()
+
+    // The pane's half: rebuild for the requested page and show it.
+    await page.setContent(
+      buildPreviewDocument(fixture.project, {
+        channel: `visual-${fixture.name}`,
+        script: '',
+        page: requested ?? undefined,
+        pages: fixture.pages,
+      }),
+      { waitUntil: 'load' },
+    )
+    await page.waitForTimeout(120)
+  }
 
   return page.screenshot({ fullPage: false })
 }
@@ -208,7 +298,16 @@ describe('preview pane', () => {
 
   for (const fixture of fixtures()) {
     it(`renders ${fixture.name}`, async () => {
-      const actual = await render(fixture.project, fixture.name)
+      const actual = await render(fixture)
+
+      if (fixture.expectAfterClick) {
+        // The click has to have been intercepted by the router, not swallowed
+        // by the browser's own navigation out of the document.
+        const text = (await page.evaluate('document.body.innerText')) as string
+        expect(text, `${fixture.name}: the link did not navigate to another page`).toContain(
+          fixture.expectAfterClick,
+        )
+      }
 
       if (fixture.expectText) {
         // A rendered frame with no text means the script never ran, and that is
