@@ -112,6 +112,73 @@ describe('extractFilesFromText', () => {
     expect(result.files).toEqual([{ path: 'index.html', content: '<html></html>' }])
     expect(result.display).toBe('Built a timer.')
   })
+
+  it('pulls an edit block out of a reply and keeps it out of the prose', () => {
+    const reply = [
+      'Lowered the default to 25 seconds.',
+      '',
+      '```edit:app.js',
+      '<<<<<<< SEARCH',
+      'const seconds = 60',
+      '=======',
+      'const seconds = 25',
+      '>>>>>>> REPLACE',
+      '```',
+    ].join('\n')
+
+    const result = extractFilesFromText(reply)
+
+    expect(result.files).toEqual([])
+    expect(result.edits).toEqual([
+      {
+        path: 'app.js',
+        edits: [{ search: 'const seconds = 60', replace: 'const seconds = 25' }],
+      },
+    ])
+    expect(result.display).toBe('Lowered the default to 25 seconds.')
+  })
+
+  it('reads a new file and an edit to another file in one reply', () => {
+    const reply = [
+      'Done.',
+      '```file:index.html',
+      '<html></html>',
+      '```',
+      '```edit:app.js',
+      '<<<<<<< SEARCH',
+      'render()',
+      '=======',
+      'render(1)',
+      '>>>>>>> REPLACE',
+      '```',
+    ].join('\n')
+
+    const result = extractFilesFromText(reply)
+
+    expect(result.files.map((file) => file.path)).toEqual(['index.html'])
+    expect(result.edits.map((block) => block.path)).toEqual(['app.js'])
+  })
+
+  it('keeps an edit block visible when it holds no usable pair', () => {
+    const result = extractFilesFromText('```edit:app.js\nnot an edit\n```')
+
+    expect(result.edits).toEqual([])
+    expect(result.display).toContain('edit:app.js')
+  })
+
+  it('reports an unterminated edit block as pending', () => {
+    const result = extractFilesFromText('Working.\n```edit:app.js\n<<<<<<< SEARCH\nold')
+
+    expect(result.edits).toEqual([])
+    expect(result.pending).toEqual(['app.js'])
+  })
+
+  it('closes a trailing edit block at the end of the stream', () => {
+    const result = extractFinal('Done.\n```edit:app.js\n<<<<<<< SEARCH\nold\n=======\nnew')
+
+    expect(result.edits).toEqual([{ path: 'app.js', edits: [{ search: 'old', replace: 'new' }] }])
+    expect(result.pending).toEqual([])
+  })
 })
 
 describe('extractFinal', () => {
@@ -279,7 +346,7 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt('plan')
 
     expect(prompt).toContain('PLAN MODE')
-    expect(prompt).toContain('Do not emit any file blocks')
+    expect(prompt).toContain('Do not emit any file or edit blocks')
     expect(prompt).not.toContain('inspect_preview()')
   })
 
@@ -289,5 +356,19 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('inspect_preview()')
     expect(prompt).toContain('run_checks()')
     expect(prompt).toContain('```plan')
+  })
+
+  it('every writing mode teaches the edit format', () => {
+    for (const mode of ['build', 'ask', 'plan'] as const) {
+      const prompt = buildSystemPrompt(mode)
+
+      expect(prompt, mode).toContain('edit:app.js')
+      expect(prompt, mode).toContain('SEARCH')
+      expect(prompt, mode).toContain('REPLACE')
+    }
+  })
+
+  it('plan mode refuses edit blocks as well as file blocks', () => {
+    expect(buildSystemPrompt('plan')).toContain('Do not emit any file or edit blocks')
   })
 })
