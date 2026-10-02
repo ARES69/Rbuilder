@@ -3,6 +3,12 @@
 #
 # The build mirrors scripts/build-desktop.ps1:
 #   front end -> server bundle -> Bun-compiled sidecar -> tauri build.
+#
+# Signing (optional): when the AZURE_* secrets are configured, both installers
+# and the main executables are signed with Azure Artifact Signing so SmartScreen
+# builds reputation for the release instead of warning about it. Without the
+# secrets the workflow builds exactly as before — nothing fails, the installers
+# just stay unsigned. Setup: docs/CODE-SIGNING.md.
 name: desktop-release
 
 on:
@@ -74,6 +80,85 @@ jobs:
           $nsis = Get-ChildItem src-tauri\target\release\bundle\nsis\*-setup.exe | Select-Object -First 1
           "msi=$($msi.FullName)" >> $env:GITHUB_OUTPUT
           "nsis=$($nsis.FullName)" >> $env:GITHUB_OUTPUT
+
+      # Signing is skipped unless every Azure secret is present, so forks and
+      # unconfigured repos keep building unsigned installers. See
+      # docs/CODE-SIGNING.md for the one-time setup of the account, identity
+      # validation, certificate profile, service principal and these secrets.
+      - name: Check signing configuration
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        id: signing
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+        run: |
+          $required = 'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
+            'AZURE_SUBSCRIPTION_ID', 'AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_ACCOUNT', 'AZURE_SIGNING_PROFILE'
+          $missing = $required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
+          if ($missing.Count -gt 0) {
+            "enabled=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Signing disabled — missing secrets: $($missing -join ', ')"
+          } else {
+            "enabled=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Signing enabled (endpoint $env:AZURE_SIGNING_ENDPOINT, account $env:AZURE_SIGNING_ACCOUNT)."
+          }
+
+      - name: Azure login
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && steps.signing.outputs.enabled == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign the executables and installers
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && steps.signing.outputs.enabled == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files: |
+            ${{ steps.collect.outputs.msi }}
+            ${{ steps.collect.outputs.nsis }}
+            src-tauri\target\release\rbuilder.exe
+            .freebuff-build\rbuilder-server.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      # The signature is the release promise: a broken or missing one ships only
+      # as a loud failure, never as a silently unsigned installer.
+      - name: Verify signatures
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $targets = @(
+            '${{ steps.collect.outputs.msi }}',
+            '${{ steps.collect.outputs.nsis }}',
+            'src-tauri\target\release\rbuilder.exe',
+            '.freebuff-build\rbuilder-server.exe'
+          )
+          $failed = $false
+          foreach ($file in $targets) {
+            $signature = Get-AuthenticodeSignature -FilePath $file
+            if ($signature.Status -ne 'Valid') {
+              $failed = $true
+              Write-Host "::error::$file — signature status: $($signature.Status) ($($signature.StatusMessage))"
+            } else {
+              Write-Host "$file — signed by $($signature.SignerCertificate.Subject)"
+            }
+          }
+          if ($failed) { exit 1 }
 
       - name: Upload build artifacts
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')

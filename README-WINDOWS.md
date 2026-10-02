@@ -52,7 +52,7 @@ pnpm exec tauri build
 
 ## Релизы через GitHub Actions
 
-Пуш тега `v*` (например, `v0.1.1`) запускает workflow [desktop-release](.github/workflows/desktop-release.yml): он typecheck'ает, гоняет тесты, собирает MSI и NSIS на `windows-latest` и прикрепляет оба установщика к GitHub Release с автогенерированными release notes. Запустить сборку без тега можно вручную: вкладка Actions → desktop-release → Run workflow (артефакты появятся в самом запуске).
+Пуш тега `v*` (например, `v0.1.1`) запускает workflow [desktop-release](.github/workflows/desktop-release.yml): он typecheck'ает, гоняет тесты, собирает MSI и NSIS на `windows-latest`, подписывает установщики и exe через Azure Artifact Signing (если настроены секреты — см. [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md); без них сборка проходит как раньше, просто без подписи) и прикрепляет оба установщика к GitHub Release с автогенерированными release notes. Запустить сборку без тега можно вручную: вкладка Actions → desktop-release → Run workflow (артефакты появятся в самом запуске).
 
 ```powershell
 git tag -a v0.1.1 -m "RBuilder 0.1.1"
