@@ -120,6 +120,167 @@ export function gitTagCommand(name: string): string {
   return `git tag -- ${safe}`
 }
 
+/* ------------------------------------------------------------------ */
+/* Merge conflicts                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Which side of a conflict a block came from.
+ *
+ * `ours` is the branch you are on — the one you started from — and `theirs` is
+ * the branch being merged into it. That naming is git's own, and it is worth
+ * keeping the words rather than inventing friendlier ones: the labels would then
+ * be the only place in the app where "ours" means something else.
+ */
+export type ConflictSide = 'ours' | 'theirs'
+
+/** One region of a conflicted file. */
+export type ConflictChunk = {
+  kind: 'conflict' | 'text'
+  /** The marker line that opens a region; for text, the text itself. */
+  header?: string
+  /** The two sides, in file order. `base` is the common ancestor (diff3 only). */
+  ours?: string[]
+  base?: string[]
+  theirs?: string[]
+}
+
+/** True when the content still carries unresolved conflict markers. */
+export function hasConflictMarkers(content: string): boolean {
+  return /^<{7}( |$)/m.test(content) && /^={7}$/m.test(content) && /^>{7}( |$)/m.test(content)
+}
+
+/**
+ * Splits a conflicted file into its conflict regions and the plain text between
+ * them, so the panel can show both sides of the disagreement instead of a wall of
+ * markers.
+ *
+ * Content with no markers parses to a single `text` chunk, which is what a file
+ * that was already resolved looks like: the panel shows it as clean rather than
+ * inventing an empty conflict.
+ */
+export function parseConflictChunks(content: string): ConflictChunk[] {
+  const lines = content.split(/\r?\n/)
+  const chunks: ConflictChunk[] = []
+  let plain: string[] = []
+
+  const flushPlain = () => {
+    if (plain.length === 0) return
+    const text = plain.join('\n')
+    plain = []
+    // An empty or all-blank file has no text worth a chunk of its own.
+    if (text.trim() === '') return
+    chunks.push({ kind: 'text', header: text })
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!
+
+    if (!isStartMarker(line)) {
+      plain.push(line)
+      continue
+    }
+
+    // Collect the blocks up to the next marker. Everything after the end marker
+    // is plain text, and a file that was never closed is treated as plain rather
+    // than silently dropping the rest.
+    const cursor = { at: i + 1 }
+    const collect = (until: (line: string) => boolean): string[] => {
+      const block: string[] = []
+      while (cursor.at < lines.length && !until(lines[cursor.at]!)) {
+        block.push(lines[cursor.at]!)
+        cursor.at += 1
+      }
+      return block
+    }
+
+    // A plain merge has two blocks. `diff3` inserts the common ancestor between
+    // them behind a `|||||||` marker, and the panel shows it because most real
+    // conflicts are both sides editing the same line — the ancestor is what tells
+    // the two edits apart.
+    const ours = collect((line) => isSeparatorMarker(line) || isBaseMarker(line))
+    let base: string[] = []
+    if (isBaseMarker(lines[cursor.at] ?? '')) {
+      cursor.at += 1
+      base = collect(isSeparatorMarker)
+    }
+    if (isSeparatorMarker(lines[cursor.at] ?? '')) cursor.at += 1
+    const theirs = collect(isEndMarker)
+
+    if (!isEndMarker(lines[cursor.at] ?? '')) {
+      // Unterminated: the region never happened, so the lines stay plain text and
+      // the walk continues from the opening marker, which is itself just text.
+      plain.push(line)
+      continue
+    }
+    cursor.at += 1
+
+    flushPlain()
+    // The marker line names the sides, which the panel shows as the heading.
+    chunks.push({ kind: 'conflict', header: line, ours, base, theirs })
+    i = cursor.at - 1
+  }
+
+  flushPlain()
+  return chunks
+}
+
+function isStartMarker(line: string): boolean {
+  return /^<{7}( .*)?$/.test(line)
+}
+
+function isSeparatorMarker(line: string): boolean {
+  return /^={7}$/.test(line)
+}
+
+/** diff3 and combined diffs label the common ancestor with `|||||||`. */
+function isBaseMarker(line: string): boolean {
+  return /^\|{7}( .*)?$/.test(line)
+}
+
+function isEndMarker(line: string): boolean {
+  return /^>{7}( .*)?$/.test(line)
+}
+
+/**
+ * Resolves one conflict by taking a side wholesale.
+ *
+ * `git checkout --ours` then `git add` is the whole operation: git writes the
+ * chosen side into the working tree and stages it, which is what clears the
+ * unmerged state. Anything cleverer — a real three-way merge — is git's job, not
+ * ours, and a merge this panel invented would be worse than the conflict.
+ *
+ * The `||` fallback covers `git checkout --ours` failing on a path git does not
+ * consider unmerged; the command then reports nothing and the panel re-reads,
+ * which is the honest outcome.
+ */
+export function gitResolveCommand(path: string, side: ConflictSide): string {
+  const safe = shellQuote(path)
+  if (!safe) return 'true'
+  return `git checkout --${side} -- ${safe} && git add -- ${safe}`
+}
+
+/** The paths git reports as unmerged, behind the same `.git` guard as the rest. */
+export const GIT_CONFLICT_COMMAND = [
+  'if [ -d .git ]; then',
+  // NUL first: a path containing a newline would otherwise arrive as two paths.
+  'git --no-pager diff --name-only --diff-filter=U -z 2>/dev/null | tr "\\0" "\\n" || true;',
+  'fi',
+].join(' ')
+
+/**
+ * Parses the output of GIT_CONFLICT_COMMAND.
+ *
+ * The command separates with NUL first, so a path containing a space or a quote
+ * survives — a newline-separated listing would split one path into two.
+ */
+export function parseConflictPaths(output: string): string[] {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+}
+
 export const GIT_PUSH_COMMAND =
   'git push -u origin HEAD 2>&1 || git push 2>&1'
 
@@ -369,6 +530,16 @@ export async function readGitExtra(
 ): Promise<GitExtra> {
   const result = await runGit(GIT_EXTRA_COMMAND, files, signal, cwd)
   return parseGitExtra(result.output)
+}
+
+/** The paths git reports as unmerged, for the panel's conflict list. */
+export async function readConflictPaths(
+  files: { path: string; content: string }[],
+  signal?: AbortSignal,
+  cwd?: string,
+): Promise<string[]> {
+  const result = await runGit(GIT_CONFLICT_COMMAND, files, signal, cwd)
+  return parseConflictPaths(result.output)
 }
 
 /**

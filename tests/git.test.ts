@@ -9,6 +9,11 @@ import {
   gitTagCommand,
   gitTone,
   isGitUsable,
+  GIT_CONFLICT_COMMAND,
+  gitResolveCommand,
+  hasConflictMarkers,
+  parseConflictChunks,
+  parseConflictPaths,
   parseGitExtra,
   parseGitState,
   parseUnifiedDiff,
@@ -218,5 +223,154 @@ describe('unified diff parsing', () => {
   it('returns nothing when the file matches HEAD', () => {
     expect(parseUnifiedDiff('')).toEqual([])
     expect(parseUnifiedDiff('\n\n')).toEqual([])
+  })
+})
+describe('conflict markers', () => {
+  it('recognises a file that still carries all three markers', () => {
+    const conflicted = ['<<<<<<< HEAD', 'mine', '=======', 'theirs', '>>>>>>> feature'].join('\n')
+    expect(hasConflictMarkers(conflicted)).toBe(true)
+    // A resolved file is the common case, and must not read as conflicted.
+    expect(hasConflictMarkers('line one\nline two\n')).toBe(false)
+    // A lone marker is just text: `<<<<<<<` shows up in prose and in diffs of
+    // files that themselves contain diffs.
+    expect(hasConflictMarkers('<<<<<<< HEAD only')).toBe(false)
+    expect(hasConflictMarkers('======= not a separator =======')).toBe(false)
+  })
+})
+
+describe('conflict chunk parsing', () => {
+  it('splits a file into plain text and one region per conflict', () => {
+    const chunks = parseConflictChunks(
+      [
+        '<h1>one</h1>',
+        '<<<<<<< HEAD',
+        '<p>mine</p>',
+        '=======',
+        '<p>theirs</p>',
+        '>>>>>>> feature',
+        '<footer/>',
+      ].join('\n'),
+    )
+
+    expect(chunks.map((chunk) => chunk.kind)).toEqual(['text', 'conflict', 'text'])
+    const region = chunks[1]!
+    expect(region.header).toBe('<<<<<<< HEAD')
+    expect(region.ours).toEqual(['<p>mine</p>'])
+    // The common ancestor is empty here: the line was added on both sides.
+    expect(region.base).toEqual([])
+    expect(region.theirs).toEqual(['<p>theirs</p>'])
+  })
+
+  it('keeps several regions apart in the order they appear', () => {
+    const chunks = parseConflictChunks(
+      [
+        '<<<<<<< HEAD',
+        'first ours',
+        '=======',
+        'first theirs',
+        '>>>>>>> feature',
+        'shared middle',
+        '<<<<<<< HEAD',
+        'second ours',
+        '=======',
+        'second theirs',
+        '>>>>>>> feature',
+      ].join('\n'),
+    )
+
+    const regions = chunks.filter((chunk) => chunk.kind === 'conflict')
+    expect(regions).toHaveLength(2)
+    expect(regions[0]!.ours).toEqual(['first ours'])
+    expect(regions[1]!.theirs).toEqual(['second theirs'])
+    expect(chunks.filter((chunk) => chunk.kind === 'text').map((chunk) => chunk.header)).toEqual([
+      'shared middle',
+    ])
+  })
+
+  it('treats a resolved file as a single block of text', () => {
+    expect(parseConflictChunks('<h1>one</h1>\n<p>two</p>')).toEqual([
+      { kind: 'text', header: '<h1>one</h1>\n<p>two</p>' },
+    ])
+    expect(parseConflictChunks('')).toEqual([])
+  })
+
+  it('does not swallow the rest of a file whose markers were never closed', () => {
+    const content = ['<<<<<<< HEAD', 'mine', '======='].join('\n')
+    const chunks = parseConflictChunks(content)
+    // Without an end marker there is no region, and the text stays exactly as it
+    // was: a half-written file is something to show, not to interpret.
+    expect(chunks.every((chunk) => chunk.kind === 'text')).toBe(true)
+    expect(chunks.map((chunk) => chunk.header).join('\n')).toBe(content)
+  })
+
+  it('reads the ancestor out of a diff3 region', () => {
+    // `git merge --diff3` (and `git show` on a combined diff) puts the common
+    // ancestor between the sides behind a `|||||||` marker instead of leaving
+    // the middle block empty.
+    const chunks = parseConflictChunks(
+      [
+        '<<<<<<< HEAD',
+        'ours',
+        '||||||| merged common ancestors',
+        'the original line',
+        '=======',
+        'theirs',
+        '>>>>>>> feature',
+      ].join('\n'),
+    )
+
+    expect(chunks).toEqual([
+      {
+        kind: 'conflict',
+        header: '<<<<<<< HEAD',
+        ours: ['ours'],
+        base: ['the original line'],
+        theirs: ['theirs'],
+      },
+    ])
+  })
+
+  it('reads CRLF files and an empty side', () => {
+    const chunks = parseConflictChunks('<<<<<<< HEAD\r\n=======\r\ntheirs\r\n>>>>>>> feature')
+    expect(chunks[0]).toEqual({
+      kind: 'conflict',
+      header: '<<<<<<< HEAD',
+      ours: [],
+      base: [],
+      theirs: ['theirs'],
+    })
+  })
+})
+
+describe('conflict discovery', () => {
+  it('asks git for unmerged paths with NUL separation', () => {
+    // A newline-separated listing would split a path that contains a newline; the
+    // command converts the NULs back only after git has named the paths.
+    expect(GIT_CONFLICT_COMMAND).toContain('--diff-filter=U')
+    expect(GIT_CONFLICT_COMMAND).toContain('-z')
+  })
+
+  it('keeps paths with spaces and drops the empty ones', () => {
+    expect(parseConflictPaths('src/app.ts\nmy notes.md\n\n')).toEqual(['src/app.ts', 'my notes.md'])
+    expect(parseConflictPaths('')).toEqual([])
+    expect(parseConflictPaths('\r\n')).toEqual([])
+  })
+})
+
+describe('conflict resolution commands', () => {
+  it('takes one side and stages the file', () => {
+    expect(gitResolveCommand('src/app.ts', 'ours')).toBe(
+      "git checkout --ours -- 'src/app.ts' && git add -- 'src/app.ts'",
+    )
+    // Staging is the point: without the add the path stays unmerged and the row
+    // in the panel would never clear.
+    expect(gitResolveCommand('src/app.ts', 'theirs')).toContain("git add -- 'src/app.ts'")
+    expect(gitResolveCommand('my notes.md', 'theirs')).toContain("'my notes.md'")
+  })
+
+  it('refuses a path that could break out of the quotes', () => {
+    expect(gitResolveCommand("it's", 'ours')).toBe('true')
+    expect(gitResolveCommand('a\nb', 'ours')).toBe('true')
+    expect(gitResolveCommand('   ', 'ours')).toBe('true')
   })
 })

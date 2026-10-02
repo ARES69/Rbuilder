@@ -6,11 +6,15 @@ import {
   gitCommitCommand,
   gitTagCommand,
   gitTone,
+  gitResolveCommand,
+  hasConflictMarkers,
+  parseConflictChunks,
   gitInitCommand,
   isGitUsable,
   GIT_PULL_COMMAND,
   GIT_PUSH_COMMAND,
   notifyGitChanged,
+  readConflictPaths,
   readGitDiff,
   readGitExtra,
   readGitState,
@@ -20,7 +24,7 @@ import {
   type GitState,
 } from '../lib/git'
 import type { PreviewEvent, PreviewInspector } from '../lib/inspector'
-import type { GitChange } from '../lib/git'
+import type { ConflictSide, GitChange } from '../lib/git'
 import type { Project, ProjectFile } from '../lib/project'
 import type { TerminalLine } from '../lib/store'
 
@@ -231,15 +235,36 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
   )
   const reference = useMemo(() => changedFiles(project, baselineProject), [project, baselineProject])
 
+  /**
+   * Merge conflicts, and the one being looked at.
+   *
+   * A conflict is the one place in the panel where looking is not enough: the
+   * file on disk carries `<<<<<<<` markers, so the diff view shows the markers
+   * rather than the disagreement. The content is read from the project (already
+   * in memory, already synced from disk) rather than through another git call.
+   */
+  const [conflicts, setConflicts] = useState<string[]>([])
+  const [openConflict, setOpenConflict] = useState<string | null>(null)
+  const conflictFile = useMemo(() => {
+    if (!openConflict) return null
+    // Guarded on the live list: once the file is staged its markers are gone from
+    // disk, and the panel should close rather than show an empty comparison.
+    if (!conflicts.includes(openConflict)) return null
+    const entry = project.files.find((file) => file.path === openConflict)
+    return entry ? { path: entry.path, content: entry.content } : null
+  }, [openConflict, conflicts, project.files])
+
   const refresh = useCallback(async () => {
     setBusy(true)
     const cwd = folderRef.current ?? undefined
-    const [next, extra] = await Promise.all([
+    const [next, extra, paths] = await Promise.all([
       readGitState(files, undefined, cwd),
       readGitExtra(files, undefined, cwd),
+      readConflictPaths(files, undefined, cwd),
     ])
     setState(next)
     setExtra(extra)
+    setConflicts(paths)
     setBusy(false)
     notifyGitChanged()
   }, [files, folder])
@@ -262,12 +287,16 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
           ? successNote
           : detail || result.error || 'Не удалось выполнить git-команду.',
       )
-      const [next, extra] = await Promise.all([
+      // Conflicts are re-read with the state: resolving one is a git command like
+      // any other, and the row it filled should disappear on its own.
+      const [next, extra, paths] = await Promise.all([
         readGitState(files, undefined, cwd),
         readGitExtra(files, undefined, cwd),
+        readConflictPaths(files, undefined, cwd),
       ])
       setState(next)
       setExtra(extra)
+      setConflicts(paths)
       setBusy(false)
       notifyGitChanged()
     },
@@ -502,6 +531,47 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
         </div>
       ) : null}
 
+      {conflicts.length > 0 ? (
+        <div className="git-conflicts">
+          <span className="git-section-label">
+            Конфликты · {conflicts.length}
+          </span>
+          <ul className="git-list">
+            {conflicts.map((path) => (
+              <li key={path} className="git-item">
+                <span className="git-status git-status--C">C</span>
+                <button
+                  type="button"
+                  className="git-file"
+                  onClick={() => setOpenConflict((current) => (current === path ? null : path))}
+                  title="Показать обе стороны конфликта"
+                >
+                  {path}
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {conflictFile ? (
+            <ConflictView
+              path={conflictFile.path}
+              content={conflictFile.content}
+              busy={busy}
+              onResolve={(side) => {
+                void run(gitResolveCommand(conflictFile.path, side), `Взята сторона ${side === 'ours' ? 'ваша' : 'их'}.`)
+                setOpenConflict(null)
+              }}
+            />
+          ) : null}
+
+          <p className="dock-note">
+            Выбор стороны выполняется командой git в привязанной папке. Чтобы совместить
+            изменения вручную, откройте файл в колонке кода, уберите маркеры и
+            зафиксируйте коммит.
+          </p>
+        </div>
+      ) : null}
+
       {extra?.commits.length ? (
         <div className="git-log">
           <span className="git-section-label">История</span>
@@ -560,6 +630,88 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
           </p>
         </>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * One conflicted file, shown as the two sides git actually recorded.
+ *
+ * The middle column is the common ancestor. It is included because most real
+ * conflicts are "both sides edited the same line" and the base is what tells
+ * the two apart; showing only ours and theirs makes it look like a coin flip.
+ */
+function ConflictView({
+  path,
+  content,
+  busy,
+  onResolve,
+}: {
+  path: string
+  content: string
+  busy: boolean
+  onResolve: (side: ConflictSide) => void
+}) {
+  const chunks = useMemo(() => parseConflictChunks(content), [content])
+  const conflicts = chunks.filter((chunk) => chunk.kind === 'conflict')
+  const unresolved = hasConflictMarkers(content)
+
+  return (
+    <div className="git-conflict">
+      <div className="git-diff-head">
+        <code>{path}</code>
+        <span className={unresolved ? 'git-conflict-flag' : 'git-conflict-flag git-conflict-flag--ok'}>
+          {conflicts.length === 0
+            ? 'без маркеров'
+            : `${conflicts.length} ${conflicts.length === 1 ? 'конфликт' : 'конфликта'}`}
+        </span>
+      </div>
+
+      {conflicts.length === 0 ? (
+        // Git also reports an unmerged path with no markers: a binary file, or a
+        // path added on one side and deleted on the other. There is nothing to
+        // compare line by line, and the buttons would still do the right thing.
+        <p className="dock-note">
+          В файле нет маркеров — git не смог разобрать его автоматически. Кнопки ниже всё
+          равно возьмут одну из версий целиком.
+        </p>
+      ) : null}
+
+      {conflicts.map((chunk, index) => (
+        <div key={index} className="git-conflict-hunk">
+          <div className="git-side git-side--ours">
+            <span className="git-side-label">Ваша ветка</span>
+            <pre>{(chunk.ours ?? []).join('\n') || ' '}</pre>
+          </div>
+          <div className="git-side git-side--base">
+            <span className="git-side-label">Общее основание</span>
+            <pre>{(chunk.base ?? []).join('\n') || ' '}</pre>
+          </div>
+          <div className="git-side git-side--theirs">
+            <span className="git-side-label">Вливаемая ветка</span>
+            <pre>{(chunk.theirs ?? []).join('\n') || ' '}</pre>
+          </div>
+        </div>
+      ))}
+
+      <div className="git-conflict-actions">
+        <button
+          type="button"
+          className="button"
+          disabled={busy}
+          onClick={() => onResolve('ours')}
+        >
+          Оставить мою
+        </button>
+        <button
+          type="button"
+          className="button"
+          disabled={busy}
+          onClick={() => onResolve('theirs')}
+        >
+          Взять их
+        </button>
+      </div>
     </div>
   )
 }

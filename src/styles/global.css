@@ -1159,6 +1159,61 @@ select {
 .git-subject { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-author { color: var(--fg-dim); flex: 0 0 auto; }
 
+/*
+ * A conflict is the one place the panel cannot answer with a diff: the file on
+ * disk carries the markers, so showing it line by line would show the markers.
+ * The three columns below are the versions git actually recorded, which is what
+ * makes the choice a decision rather than a guess.
+ */
+.git-conflicts { border-top: 1px solid var(--line); }
+.git-conflict { border-top: 1px solid var(--line); padding-bottom: var(--space-3); }
+.git-conflict-flag {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--warn);
+}
+.git-conflict-flag--ok { color: var(--add); }
+.git-conflict-hunk {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  margin: 0 var(--space-4) var(--space-3);
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.git-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-1);
+}
+.git-side-label {
+  padding: 4px 8px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--line);
+}
+.git-side pre {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  max-height: 220px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.git-side--ours .git-side-label { color: var(--add); }
+.git-side--theirs .git-side-label { color: var(--warn); }
+.git-conflict-actions { display: flex; gap: var(--space-2); padding: 0 var(--space-4); }
+/* The three columns are unreadable on a narrow dock, so they stack instead. */
+@media (max-width: 1100px) {
+  .git-conflict-hunk { grid-template-columns: 1fr; }
+}
+
 /* Files --- */
 
 .files {

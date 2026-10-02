@@ -207,6 +207,25 @@ command: a repository created there would be thrown away with the next run, and
 until then the panel would report a branch and a history belonging to nothing.
 The panel says so instead of offering the actions.
 
+### Merge conflicts
+
+Unmerged paths are listed on their own, above the change list, because a conflict
+is the one case where a diff is not an answer: the file on disk carries
+`<<<<<<<` markers, so the diff shows the markers rather than the disagreement.
+
+Clicking a file shows three columns — **your branch**, the **common ancestor**,
+and the **merged-in branch** — one row per region. The ancestor is included
+because most real conflicts are both sides editing the same line, and it is what
+tells the two edits apart; the `diff3` form (`|||||||`) and the plain two-way form
+are both read. **Оставить мою** and **Взять их** run
+`git checkout --<side> -- <path> && git add -- <path>`, which writes the chosen
+side and clears the unmerged state, so the row disappears on its own.
+
+Choosing a side is the whole operation by design. A real three-way merge of a
+region belongs to git: an editor that invented its own would be worse than the
+conflict it replaced. To combine both sides by hand, edit the file in the code
+column, remove the markers and commit — the panel says the same thing.
+
 ## Watching the project folder
 
 A bound folder is watched with the OS's own filesystem notifications (`notify`:
