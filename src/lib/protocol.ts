@@ -21,6 +21,7 @@
  */
 
 import { z } from 'zod'
+import { parseEditBody, type EditBlock } from './edits'
 import { normalizePath, type ProjectFileInput } from './project'
 
 /* ------------------------------------------------------------------ */
@@ -152,22 +153,43 @@ export const TOOL_DEFINITIONS = [
 /* Prompts                                                            */
 /* ------------------------------------------------------------------ */
 
+const EDIT_PROTOCOL = `Changing part of a file instead of rewriting it:
+
+\`\`\`edit:app.js
+<<<<<<< SEARCH
+const seconds = 60
+=======
+const seconds = 25
+>>>>>>> REPLACE
+\`\`\`
+
+Rules for edit blocks:
+- The SEARCH text must match the file exactly, copied from what you wrote or from read_project_file. If you are not sure of the current text, read the file first.
+- One edit block per file; several SEARCH/REPLACE pairs inside it are applied in order. A pair that matches nothing is refused and reported back to you — nothing is written for that file.
+- Include the whole surrounding lines you want replaced, including indentation, and keep them unique in the file.
+- Never put the markers inside the file content; a plain \`=======\` separator without the SEARCH/REPLACE lines also works.
+- Edits are what you use for a fix, a rename, a new handler or a tweaked value. Full file blocks are for new files and rewrites.`
+
 const PROTOCOL = `You are RBUILDER, an AI app builder. The user chats with you on the left while the app you are building renders live in a preview on the right.
 
 You build a single-page web app from plain HTML, CSS and JavaScript: no build step, no frameworks, no package installs. The preview renders the project's index.html inside a sandboxed iframe.
 
 How to reply:
 1. Write a short plain-prose summary of what you did, 2-4 sentences. No headings, no bullet lists of files.
-2. Then emit every file you created or changed as a fenced block using exactly this form:
+2. Then emit every file you created as a full block, and every change to an existing file as an edit block:
 
 \`\`\`file:index.html
 <!doctype html>
 <html>...</html>
 \`\`\`
 
+${EDIT_PROTOCOL}
+
 Rules:
-- The info string is always "file:" followed by the project-relative path. Never use html, css or js as the info string.
-- Emit the complete file content every time, even for tiny edits.
+- The info string is always "file:" or "edit:" followed by the project-relative path. Never use html, css or js as the info string.
+- New file, or most of the file changes: emit the complete content with a file block.
+- Small change in a file you have already written this turn or that you know exactly: emit an edit block. Do not rewrite a whole file to change a few lines.
+- Only emit files you actually changed. Never repeat files that did not change.
 - index.html must always exist and stay valid. Reference other files relatively, for example <link rel="stylesheet" href="styles.css"> and <script src="app.js"></script>. You may put all CSS and JS inside index.html instead.
 - Only emit files you actually changed. Never repeat files that did not change.
 - Do not link third-party stylesheets. You may pull a library from a CDN only when the user asks for it.
@@ -220,7 +242,7 @@ ${PLAN_PROTOCOL}
 
 You are in ASK MODE: every batch of file blocks you emit is shown to the user for approval before it is applied, and every command you ask run_command to run is approved the same way before it executes.
 
-- Keep emitting complete file blocks exactly as usual; the interface collects them into one approval card.
+- Keep emitting complete file blocks and edit blocks exactly as usual; the interface collects both into one approval card.
 - The user either approves the batch (it is applied, and you continue) or rejects it (you are told in the next message).
 - When a batch is rejected, change your approach — do not repeat the same writes.
 - Work in small steps: propose one coherent batch, then verify it once it lands.`
@@ -233,7 +255,7 @@ ${INTEGRATIONS}
 
 You are in PLAN MODE. The user wants to agree on an approach before any code is written.
 
-- Do not emit any file blocks. Nothing you write will be applied.
+- Do not emit any file or edit blocks. Nothing you write will be applied.
 - Reply with a short plan: what the app will be, the structure of the files, and the key decisions (2-5 sentences of prose).
 - Then emit the checklist in a fenced plan block, with every item unchecked:
 
@@ -263,6 +285,8 @@ Work in small steps: make the change, then verify it. If a check or the preview 
 export type ExtractResult = {
   /** Complete file blocks, in the order they appeared. */
   files: ProjectFileInput[]
+  /** Complete edit blocks, in the order they appeared. */
+  edits: EditBlock[]
   /** Prose to show in the chat. File blocks are removed; the chat lists them as chips. */
   display: string
   /** Files that started but whose opening fence has not closed yet. */
@@ -273,19 +297,22 @@ export type PlanItem = { text: string; done: boolean }
 export type PlanResult = { items: PlanItem[]; display: string }
 
 const fileFence = /^```file:(.+)$/
+const editFence = /^```edit:(.+)$/
 const planFence = /^```plan\s*$/
 const planItem = /^\s*[-*]\s*\[( |x|X)\]\s*(.+?)\s*$/
 
-/** Pulls file blocks out of a (possibly partial) model reply. */
+/** Pulls file and edit blocks out of a (possibly partial) model reply. */
 export function extractFilesFromText(text: string): ExtractResult {
   const lines = text.split('\n')
   const files: ProjectFileInput[] = []
+  const edits: EditBlock[] = []
   const pending: string[] = []
   const display: string[] = []
 
   let index = 0
   while (index < lines.length) {
-    const match = fileFence.exec(lines[index]!.trim())
+    const trimmed = lines[index]!.trim()
+    const match = fileFence.exec(trimmed) ?? editFence.exec(trimmed)
 
     if (!match) {
       display.push(lines[index]!)
@@ -293,6 +320,7 @@ export function extractFilesFromText(text: string): ExtractResult {
       continue
     }
 
+    const isEdit = editFence.test(trimmed)
     const path = normalizePath(match[1]!.trim())
     const bodyStart = index + 1
     let closing = -1
@@ -316,7 +344,16 @@ export function extractFilesFromText(text: string): ExtractResult {
       continue
     }
 
-    files.push({ path, content: lines.slice(bodyStart, closing).join('\n') })
+    const body = lines.slice(bodyStart, closing).join('\n')
+    if (isEdit) {
+      const parsed = parseEditBody(body)
+      // An edit block with no usable pair is a protocol mistake, not a change:
+      // it stays in the prose so the mistake is visible instead of silent.
+      if (parsed.length > 0) edits.push({ path, edits: parsed })
+      else display.push(lines[index]!)
+    } else {
+      files.push({ path, content: body })
+    }
     // Nothing is added to the prose: the chat renders the written files as chips.
     display.push('')
     index = closing + 1
@@ -324,12 +361,12 @@ export function extractFilesFromText(text: string): ExtractResult {
 
   const cleaned = stripBlankRuns(display.join('\n'))
 
-  if (files.length === 0) {
+  if (files.length === 0 && edits.length === 0) {
     const envelope = parseJsonEnvelope(cleaned)
     if (envelope) return envelope
   }
 
-  return { files, display: cleaned, pending }
+  return { files, edits, display: cleaned, pending }
 }
 
 /**
@@ -381,7 +418,7 @@ export function extractReply(text: string): ExtractResult & { plan: PlanItem[] }
   const files = extractFilesFromText(text)
   const plan = extractPlan(files.display)
 
-  return { files: files.files, display: plan.display, pending: files.pending, plan: plan.items }
+  return { files: files.files, edits: files.edits, display: plan.display, pending: files.pending, plan: plan.items }
 }
 
 /** Same as extractReply, but an unterminated final file block is closed at the end. */
@@ -389,13 +426,13 @@ export function extractFinal(text: string): ExtractResult & { plan: PlanItem[] }
   const files = extractFilesFromText(text)
   if (files.pending.length === 0) {
     const plan = extractPlan(files.display)
-    return { files: files.files, display: plan.display, pending: [], plan: plan.items }
+    return { files: files.files, edits: files.edits, display: plan.display, pending: [], plan: plan.items }
   }
 
   // Re-run with an implicit closing fence for the trailing block.
   const recovered = extractFilesFromText(`${text}\n\`\`\`\n`)
   const plan = extractPlan(recovered.display)
-  return { files: recovered.files, display: plan.display, pending: [], plan: plan.items }
+  return { files: recovered.files, edits: recovered.edits, display: plan.display, pending: [], plan: plan.items }
 }
 
 const envelopeSchema = z.object({
@@ -426,6 +463,7 @@ function parseJsonEnvelope(text: string): ExtractResult | null {
       const path = normalizePath(file.path)
       return path ? [{ path, content: file.content }] : []
     }),
+    edits: [],
     display: reply ?? '',
     pending: [],
   }

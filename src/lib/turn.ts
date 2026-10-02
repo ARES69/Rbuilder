@@ -27,6 +27,7 @@ import {
   type Budget,
   type BudgetLimits,
 } from './budget'
+import { editSignature, type EditBlock, type EditFailure } from './edits'
 import {
   extractFinal,
   extractReply,
@@ -64,6 +65,16 @@ export type TurnHooks = {
    * writes do. Resolves true to run, false when the user declined.
    */
   requestCommandApproval?: (command: string) => Promise<boolean>
+  /**
+   * Search-and-replace blocks are resolved against the project as it stands
+   * when they are applied. `base` carries the whole-file writes that land first
+   * in the same batch, so an edit in a file the same reply created still
+   * matches. Returns whole new file contents plus the pairs that did not match.
+   */
+  resolveEdits?: (blocks: EditBlock[], base: ProjectFileInput[]) => {
+    writes: ProjectFileInput[]
+    failures: EditFailure[]
+  }
   execute: (call: ToolCall) => Promise<ToolOutcome>
 }
 
@@ -97,6 +108,12 @@ export async function runAgentTurn(
   const prepared: string[] = []
   /** Ask mode holds the full writes (paths and content) until they are approved. */
   const preparedFiles: ProjectFileInput[] = []
+  /** Ask mode holds the edit blocks of the same batch, resolved at the gate. */
+  const preparedEdits: EditBlock[] = []
+  /** A block the model repeats verbatim in a later step is not applied twice. */
+  const appliedEdits = new Set<string>()
+  /** Pairs that did not match, reported to the model on the next step. */
+  let editFailures: EditFailure[] = []
   let budget = createBudget(input.limits)
   let prose = ''
   let plan: PlanItem[] = []
@@ -120,7 +137,50 @@ export async function runAgentTurn(
     const wrappingUp = shouldWrapUp(budget, now)
     let raw = ''
     let appliedCount = 0
+    let appliedEditCount = 0
     const calls: ToolCall[] = []
+
+    /** Routes one freshly closed block to the mode it belongs to. */
+    const takeEdits = (fresh: EditBlock[]) => {
+      const unique = fresh.filter((block) => {
+        const signature = editSignature(block)
+        if (appliedEdits.has(signature)) return false
+        appliedEdits.add(signature)
+        return true
+      })
+      if (unique.length === 0) return
+
+      if (isPlan) {
+        for (const block of unique) if (!prepared.includes(block.path)) prepared.push(block.path)
+        return
+      }
+
+      if (isAsk) {
+        // One block per file in a batch: a later block for the same file wins.
+        for (const block of unique) {
+          const existing = preparedEdits.findIndex((entry) => entry.path === block.path)
+          if (existing >= 0) preparedEdits[existing] = block
+          else preparedEdits.push(block)
+        }
+        return
+      }
+
+      const resolved = resolveEditBlocks(unique, [])
+      for (const write of resolved.writes) {
+        if (!files.includes(write.path)) files.push(write.path)
+      }
+      if (resolved.writes.length > 0) hooks.onFiles(resolved.writes)
+      editFailures.push(...resolved.failures)
+    }
+
+    /** Edits need the project as it is right now; the host owns it. */
+    const resolveEditBlocks = (blocks: EditBlock[], base: ProjectFileInput[]) =>
+      hooks.resolveEdits
+        ? hooks.resolveEdits(blocks, base)
+        : {
+            writes: [] as ProjectFileInput[],
+            failures: blocks.map((block) => ({ path: block.path, reason: 'editing is not available in this session' })),
+          }
 
     const step = await streamStep(
       {
@@ -155,6 +215,11 @@ export async function runAgentTurn(
               for (const file of fresh) if (!files.includes(file.path)) files.push(file.path)
               hooks.onFiles(fresh)
             }
+          }
+          if (parsed.edits.length > appliedEditCount) {
+            const fresh = parsed.edits.slice(appliedEditCount)
+            appliedEditCount = parsed.edits.length
+            takeEdits(fresh)
           }
           if (parsed.plan.length > 0) {
             plan = parsed.plan
@@ -204,6 +269,11 @@ export async function runAgentTurn(
         hooks.onFiles(fresh)
       }
     }
+    if (final.edits.length > appliedEditCount) {
+      const fresh = final.edits.slice(appliedEditCount)
+      appliedEditCount = final.edits.length
+      takeEdits(fresh)
+    }
     if (final.plan.length > 0) {
       plan = final.plan
       hooks.onPlan(plan)
@@ -214,17 +284,26 @@ export async function runAgentTurn(
     // Ask mode: the whole batch waits for the user before it lands. The gate
     // sits before the exit checks so the final batch of a turn is asked too.
     let rejectedPaths: string[] | null = null
-    if (isAsk && preparedFiles.length > 0) {
-      const batch = preparedFiles.splice(0, preparedFiles.length)
+    if (isAsk && (preparedFiles.length > 0 || preparedEdits.length > 0)) {
+      const writes = preparedFiles.splice(0, preparedFiles.length)
+      const blocks = preparedEdits.splice(0, preparedEdits.length)
+      // Edits resolve against the writes of this same batch: a file created and
+      // then changed in one reply is one card, and the edit must see the new text.
+      const resolved = resolveEditBlocks(blocks, writes)
+      const batch = [...writes, ...resolved.writes]
+      editFailures.push(...resolved.failures)
+
       const approved = signal?.aborted
         ? false
-        : await (hooks.requestApproval
+        : await (hooks.requestApproval && batch.length > 0
             ? hooks.requestApproval(batch)
-            : Promise.resolve(true))
+            : Promise.resolve(batch.length === 0))
       if (approved) {
         for (const file of batch) if (!files.includes(file.path)) files.push(file.path)
-        hooks.onFiles(batch)
-        hooks.onReply(prose, files)
+        if (batch.length > 0) {
+          hooks.onFiles(batch)
+          hooks.onReply(prose, files)
+        }
       } else if (signal?.aborted) {
         stopped = true
         break
@@ -249,6 +328,18 @@ export async function runAgentTurn(
         role: 'user',
         content: `The user rejected the proposed changes to ${rejectedPaths.join(', ')}. Nothing was applied. Change your approach — do not rewrite the same thing; adjust or ask what to change.`,
       })
+    }
+
+    // An edit whose SEARCH text was not in the file is the model's chance to
+    // correct itself: it is told which file and which fragment, and nothing was
+    // written for it.
+    if (editFailures.length > 0) {
+      const report = editFailures.map((failure) => `${failure.path} — ${failure.reason}`).join('; ')
+      stepTurns.push({
+        role: 'user',
+        content: `Your edits were not applied: ${report}. Read the file again and repeat the edit with text that matches it exactly, or use a full file block if the file changed a lot.`,
+      })
+      editFailures = []
     }
 
     // Let React commit the rebuilt preview before a tool looks at the frame:

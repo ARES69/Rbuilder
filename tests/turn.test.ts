@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_LIMITS, HARD_STEP_CAP, type Budget } from '../src/lib/budget'
 import type { ChatTurn } from '../src/lib/protocol'
 import { runAgentTurn, type TurnHooks } from '../src/lib/turn'
+import type { EditBlock } from '../src/lib/edits'
 
 type RequestBody = {
   turns: ChatTurn[]
@@ -393,5 +394,166 @@ describe('ask mode: commands', () => {
     })
 
     expect(executed).toBe(0)
+  })
+})
+
+describe('search-and-replace edits', () => {
+  const editStep = (id: string, tool = false): Event[] => [
+    { type: 'delta', delta: '```edit:app.js\n<<<<<<< SEARCH\nconst seconds = 60\n=======\nconst seconds = 25\n>>>>>>> REPLACE\n```\n' },
+    ...(tool ? [{ type: 'tool_call', id, name: 'inspect_preview', arguments: '{}' }] : []),
+  ]
+
+  /** Stands in for App.tsx: resolves a pair against a fixed project. */
+  const resolver = (project: Record<string, string>, failures: string[] = []) => ({
+    resolveEdits: (blocks: EditBlock[]) => ({
+      writes: blocks.flatMap((block) => {
+        const current = project[block.path]
+        if (!current) {
+          failures.push(block.path)
+          return []
+        }
+        return [{ path: block.path, content: `${current} :: edited` }]
+      }),
+      failures: failures
+        .filter((path) => !project[path])
+        .map((path) => ({ path, reason: 'the file does not exist yet' })),
+    }),
+  })
+
+  it('applies an edit block as a whole-file write', async () => {
+    installProvider((step) => (step === 1 ? editStep('c1') : [{ type: 'delta', delta: 'Done.' }]))
+    const rec = recorder()
+    const written: { path: string; content: string }[] = []
+
+    const result = await runAgentTurn({ turns: ASK, mode: 'build' }, {
+      ...rec.hooks,
+      onFiles: (fresh) => written.push(...fresh),
+      ...resolver({ 'app.js': 'const seconds = 60' }),
+    })
+
+    expect(written).toEqual([{ path: 'app.js', content: 'const seconds = 60 :: edited' }])
+    expect(result.files).toEqual(['app.js'])
+  })
+
+  it('reports an edit that matched nothing and applies nothing for it', async () => {
+    const bodies = installProvider((step) =>
+      step === 1
+        ? [
+            { type: 'delta', delta: '```edit:ghost.js\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n```\n' },
+            { type: 'tool_call', id: 'c1', name: 'inspect_preview', arguments: '{}' },
+          ]
+        : [{ type: 'delta', delta: 'Retrying.' }],
+    )
+    const rec = recorder()
+    const written: string[] = []
+    const missing: string[] = []
+
+    await runAgentTurn({ turns: ASK, mode: 'build' }, {
+      ...rec.hooks,
+      onFiles: (fresh) => written.push(...fresh.map((file) => file.path)),
+      ...resolver({}, missing),
+    })
+
+    expect(written).toEqual([])
+    expect(missing).toEqual(['ghost.js'])
+    // The next step must know the edit failed, before the tool results.
+    const note = bodies[1]!.turns.find(
+      (turn) => turn.role === 'user' && turn.content.includes('not applied'),
+    )
+    expect(note?.content).toContain('ghost.js')
+  })
+
+  it('applies the same edit block once even when the model repeats it', async () => {
+    installProvider((step) => (step <= 2 ? editStep(`c${step}`, step === 1) : [{ type: 'delta', delta: 'Done.' }]))
+    const rec = recorder()
+    const written: string[] = []
+
+    await runAgentTurn({ turns: ASK, mode: 'build' }, {
+      ...rec.hooks,
+      onFiles: (fresh) => written.push(...fresh.map((file) => file.path)),
+      ...resolver({ 'app.js': 'const seconds = 60' }),
+    })
+
+    expect(written).toEqual(['app.js'])
+  })
+
+  it('waits for approval in ask mode and lands the resolved file', async () => {
+    installProvider((step) => (step === 1 ? editStep('c1', true) : [{ type: 'delta', delta: 'Approved.' }]))
+    const rec = recorder()
+    const approved: string[] = []
+
+    const result = await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      ...resolver({ 'app.js': 'const seconds = 60' }),
+      requestApproval: async (batch) => {
+        approved.push(...batch.map((file) => `${file.path}:${file.content}`))
+        return true
+      },
+    })
+
+    expect(approved).toEqual(['app.js:const seconds = 60 :: edited'])
+    expect(result.files).toEqual(['app.js'])
+  })
+
+  it('tells the model when an edit batch is rejected', async () => {
+    const bodies = installProvider((step) => (step === 1 ? editStep('c1', true) : [{ type: 'delta', delta: 'Understood.' }]))
+    const rec = recorder()
+
+    await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      ...resolver({ 'app.js': 'const seconds = 60' }),
+      requestApproval: async () => false,
+    })
+
+    const note = bodies[1]!.turns.find((turn) => turn.role === 'user' && turn.content.includes('rejected'))
+    expect(note?.content).toContain('app.js')
+    expect(rec.files).toEqual([])
+  })
+
+  it('resolves an edit against a file created in the same batch', async () => {
+    installProvider((step) =>
+      step === 1
+        ? [
+            {
+              type: 'delta',
+              delta: '```file:new.html\n<h1>hi</h1>\n```\n```edit:new.html\n<<<<<<< SEARCH\nhi\n=======\nhello\n>>>>>>> REPLACE\n```\n',
+            },
+          ]
+        : [{ type: 'delta', delta: 'Done.' }],
+    )
+    const rec = recorder()
+    let base: { path: string; content: string }[] = []
+
+    await runAgentTurn({ turns: ASK, mode: 'ask' }, {
+      ...rec.hooks,
+      resolveEdits: (blocks, incoming) => {
+        base = incoming
+        return {
+          writes: blocks.map((block) => ({ path: block.path, content: 'hello' })),
+          failures: [],
+        }
+      },
+      requestApproval: async () => true,
+    })
+
+    expect(base.map((file) => file.path)).toEqual(['new.html'])
+  })
+
+  it('holds edit blocks in plan mode and never resolves them', async () => {
+    installProvider((step) => (step === 1 ? editStep('c1') : [{ type: 'delta', delta: 'Planned.' }]))
+    const rec = recorder()
+    let resolved = 0
+
+    const result = await runAgentTurn({ turns: ASK, mode: 'plan' }, {
+      ...rec.hooks,
+      resolveEdits: () => {
+        resolved += 1
+        return { writes: [], failures: [] }
+      },
+    })
+
+    expect(resolved).toBe(0)
+    expect(result.files).toEqual([])
+    expect(result.prose).toContain('app.js')
   })
 })

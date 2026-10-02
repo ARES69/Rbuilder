@@ -25,6 +25,7 @@ import { GIT_CHANGED_EVENT, readGitState } from './lib/git'
 import { attachmentsToContext, type AttachmentMeta } from './lib/attachments'
 import type { Budget } from './lib/budget'
 import { runChecks, type ChecksResult } from './lib/checks'
+import { applyEdits, type EditBlock, type EditResolution } from './lib/edits'
 import { channelFor, PreviewInspector } from './lib/inspector'
 import {
   buildPreviewDocument,
@@ -298,6 +299,35 @@ export default function App() {
     }
   }, [])
 
+  /**
+   * Search-and-replace blocks resolve here, against the project as it stands.
+   * `base` is the batch of whole files that lands first (ask mode holds both
+   * kinds), so an edit to a file created in the same reply still matches.
+   */
+  const resolveEdits = useCallback((blocks: EditBlock[], base: ProjectFileInput[]): EditResolution => {
+    const writes: ProjectFileInput[] = []
+    const failures: { path: string; reason: string }[] = []
+
+    for (const block of blocks) {
+      const incoming = base.find((entry) => entry.path === block.path)
+      const current = incoming ?? projectRef.current.files.find((entry) => entry.path === block.path)
+
+      if (!current) {
+        failures.push({
+          path: block.path,
+          reason: 'the file does not exist yet — create it with a ```file: block first',
+        })
+        continue
+      }
+
+      const applied = applyEdits(current.content, block.edits)
+      if (!applied.ok) failures.push({ path: block.path, reason: applied.reason })
+      else writes.push({ path: block.path, content: applied.content })
+    }
+
+    return { writes, failures }
+  }, [])
+
   const send = useCallback(
     async (text: string, attachments: AttachmentMeta[], modeOverride?: AgentMode) => {
       if (busyRef.current) return
@@ -413,6 +443,7 @@ export default function App() {
           },
           requestApproval,
           requestCommandApproval,
+          resolveEdits,
         },
         controller.signal,
       )
@@ -443,7 +474,7 @@ export default function App() {
       setBusy(false)
       setBudget(null)
     },
-    [activeProvider, applyFiles, inspector],
+    [activeProvider, applyFiles, inspector, resolveEdits],
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
