@@ -56,6 +56,12 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+      # The Rust side has its own tests (folder watching, path safety), and they
+      # were never wired in: the pipeline compiled the shell but never checked
+      # the logic in it.
+      - name: Run the Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Install Chromium for the visual tests
         run: pnpm exec playwright install --with-deps chromium
 
