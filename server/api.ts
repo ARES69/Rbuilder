@@ -219,6 +219,13 @@ const execRequestSchema = z.object({
   files: z.array(z.object({ path: z.string().max(300), content: z.string().max(600_000) })).max(60),
   /** When set, the command runs in this bound project folder instead of the scratch copy. */
   cwd: z.string().max(500).optional(),
+  /**
+   * Set once the client has just re-read the folder, so a write may replace a
+   * file that changed outside the app. Without it such a file is left alone:
+   * the client re-sends its whole project on every command, and a blind write
+   * would discard an edit made in the user's editor.
+   */
+  synced: z.boolean().optional(),
 })
 
 type RawTurn = z.infer<typeof turnSchema>
@@ -583,7 +590,7 @@ async function handleExec(req: IncomingMessage, res: ServerResponse, root: strin
   let cwd: string
   try {
     cwd = parsed.cwd
-      ? await resolveBoundFolder(parsed.cwd, parsed.files as CommandFile[])
+      ? await resolveBoundFolder(parsed.cwd, parsed.files as CommandFile[], parsed.synced === true)
       : await materializeProject(root, parsed.files as CommandFile[])
   } catch (error) {
     writeLine(res, { type: 'error', message: `Could not prepare the workspace: ${messageOf(error)}` })
@@ -600,7 +607,11 @@ async function handleExec(req: IncomingMessage, res: ServerResponse, root: strin
  * A bound project folder: absolute, existing, and it receives the current
  * project files, so the command sees the same tree the preview does.
  */
-async function resolveBoundFolder(candidate: string, files: CommandFile[]): Promise<string> {
+async function resolveBoundFolder(
+  candidate: string,
+  files: CommandFile[],
+  synced = false,
+): Promise<string> {
   const dir = path.resolve(candidate)
   if (!path.isAbsolute(dir)) {
     throw new Error('the project folder must be an absolute path')
@@ -609,7 +620,7 @@ async function resolveBoundFolder(candidate: string, files: CommandFile[]): Prom
   if (!info?.isDirectory()) {
     throw new Error('the project folder does not exist')
   }
-  return writeProjectInto(dir, files)
+  return writeProjectInto(dir, files, { acceptExternal: synced })
 }
 
 /* ------------------------------------------------------------------ */

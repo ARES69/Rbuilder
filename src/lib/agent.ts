@@ -204,13 +204,19 @@ export async function execCommand(
   signal?: AbortSignal,
   /** The bound project folder: the command runs there instead of the scratch copy. */
   cwd?: string,
+  /**
+   * True when the caller has just re-read the folder and knows `files` matches
+   * it. The server then treats the app's content as the newer truth; without
+   * this it refuses to overwrite a file that changed outside the app.
+   */
+  synced = false,
 ): Promise<{ ok: boolean; error?: string }> {
   let response: Response
   try {
     response = await fetch(apiUrl('/api/exec'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command, files, cwd }),
+      body: JSON.stringify({ command, files, cwd, synced }),
       signal,
     })
   } catch (error) {
