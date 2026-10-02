@@ -9,20 +9,32 @@ export type Approval = {
   status: 'pending' | 'approved' | 'rejected'
 }
 
+/** Ask-mode gate for agent commands: one command waiting for a yes/no. */
+export type CommandApproval = {
+  id: string
+  command: string
+  status: 'pending' | 'approved' | 'rejected'
+}
+
 type Props = {
   approval: Approval | null
   /** Current project files: the baseline the proposed writes are diffed against. */
   files: { path: string; content: string }[]
   onApprove: () => void
   onReject: () => void
+  /** When set, the pending item is a command instead of a file batch. */
+  commandApproval?: CommandApproval | null
+  onApproveCommand?: () => void
+  onRejectCommand?: () => void
 }
 
 /**
  * The ask-mode gate: while the turn is running, each proposed batch waits here
  * until the user allows it. A rejected card stays visible as the record of
- * what was not applied.
+ * what was not applied. The same panel shows a command waiting for approval
+ * when the agent asked to run one.
  */
-export function ApprovalPanel({ approval, files, onApprove, onReject }: Props) {
+export function ApprovalPanel({ approval, files, onApprove, onReject, commandApproval, onApproveCommand, onRejectCommand }: Props) {
   const rows = useMemo(() => {
     if (!approval) return []
     const byPath = new Map(files.map((file) => [file.path, file.content]))
@@ -31,6 +43,35 @@ export function ApprovalPanel({ approval, files, onApprove, onReject }: Props) {
       return { path: file.path, added: diff.added, removed: diff.removed, isNew: !byPath.has(file.path) }
     })
   }, [approval, files])
+
+  if (commandApproval && commandApproval.status !== 'approved') {
+    if (commandApproval.status === 'rejected') {
+      return (
+        <section className="approval approval--rejected" aria-label="Команда отклонена">
+          <span className="approval-rejected-note">
+            Команда отклонена — агент попробует другой способ проверки.
+          </span>
+        </section>
+      )
+    }
+
+    return (
+      <section className="approval" aria-label="Требуется подтверждение команды">
+        <div className="approval-head">
+          <span className="approval-title">Хочет выполнить команду</span>
+        </div>
+        <pre className="approval-command"><code>{commandApproval.command}</code></pre>
+        <div className="approval-actions">
+          <button type="button" className="approval-button approval-button--primary" onClick={onApproveCommand}>
+            Запустить
+          </button>
+          <button type="button" className="approval-button" onClick={onRejectCommand}>
+            Отклонить
+          </button>
+        </div>
+      </section>
+    )
+  }
 
   if (!approval || approval.status === 'approved') return null
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApprovalPanel, type Approval } from './ApprovalPanel'
+import { ApprovalPanel, type Approval, type CommandApproval } from './ApprovalPanel'
 import { Composer } from './Composer'
 import { MessageList } from './MessageList'
 import { PlanPanel } from './PlanPanel'
@@ -24,6 +24,10 @@ type Props = {
   approval: Approval | null
   onApproveFiles: () => void
   onRejectFiles: () => void
+  /** Ask mode: a command waiting for the user's decision. */
+  commandApproval?: CommandApproval | null
+  onApproveCommand?: () => void
+  onRejectCommand?: () => void
   /** Current project files + transcript actions (diff rows, undo). */
   files: { path: string; content: string }[]
   onOpenFile: (path: string) => void
@@ -58,6 +62,9 @@ export function ChatPanel({
   approval,
   onApproveFiles,
   onRejectFiles,
+  commandApproval,
+  onApproveCommand,
+  onRejectCommand,
   files,
   onOpenFile,
   onUndo,
@@ -154,7 +161,15 @@ export function ChatPanel({
         onUndo={onUndo}
       />
 
-      <ApprovalPanel approval={approval} files={files} onApprove={onApproveFiles} onReject={onRejectFiles} />
+      <ApprovalPanel
+        approval={approval}
+        files={files}
+        onApprove={onApproveFiles}
+        onReject={onRejectFiles}
+        commandApproval={commandApproval}
+        onApproveCommand={onApproveCommand}
+        onRejectCommand={onRejectCommand}
+      />
 
       <PlanPanel plan={plan} mode={mode} busy={busy} onApprove={onApprovePlan} />
 

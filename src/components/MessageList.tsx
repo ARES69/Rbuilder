@@ -54,6 +54,8 @@ function toolVerb(name: string): string {
       return 'Прочитал'
     case 'run_checks':
       return 'Прогнал проверки'
+    case 'run_command':
+      return 'Запустил'
     default:
       return name
   }
@@ -68,6 +70,8 @@ function toolGlyph(name: string): string {
       return '▤'
     case 'run_checks':
       return '✓'
+    case 'run_command':
+      return '$'
     default:
       return '⌘'
   }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { InspectorPanel, type InspectorTab } from './components/InspectorPanel'
-import type { Approval } from './components/ApprovalPanel'
+import type { Approval, CommandApproval } from './components/ApprovalPanel'
 import { ChatPanel } from './components/ChatPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { BrowserSessionPanel } from './components/BrowserSessionPanel'
@@ -46,7 +46,7 @@ import {
   saveStoredWorkspaces,
   type Workspace,
 } from './lib/workspace'
-import { describeCall, executeTool, type ToolOutcome } from './lib/tools'
+import { describeCall, executeTool, makeRunCommandHandler, type ToolOutcome } from './lib/tools'
 import { runAgentTurn } from './lib/turn'
 import type { AgentMode, ChatTurn } from './lib/protocol'
 import { applyTheme, loadTheme, type Theme } from './lib/theme'
@@ -81,6 +81,9 @@ export default function App() {
   /** Ask mode: the batch of writes currently waiting for (or declined by) the user. */
   const [approval, setApproval] = useState<Approval | null>(null)
   const approvalResolver = useRef<((ok: boolean) => void) | null>(null)
+  /** Ask mode: a command waiting for (or declined by) the user. */
+  const [commandApproval, setCommandApproval] = useState<CommandApproval | null>(null)
+  const commandApprovalResolver = useRef<((ok: boolean) => void) | null>(null)
   /**
    * The real folder this project's files live in: the model writes land there,
    * and the terminal and git run inside it. Desktop keeps the path; the browser
@@ -345,12 +348,20 @@ export default function App() {
       controller.signal.addEventListener('abort', () => {
         approvalResolver.current?.(false)
         approvalResolver.current = null
+        commandApprovalResolver.current?.(false)
+        commandApprovalResolver.current = null
       })
 
       const requestApproval = (files: ProjectFileInput[]) =>
         new Promise<boolean>((resolve) => {
           approvalResolver.current = resolve
           setApproval({ id: uid('appr'), files: files.map((file) => ({ ...file })), status: 'pending' })
+        })
+
+      const requestCommandApproval = (command: string) =>
+        new Promise<boolean>((resolve) => {
+          commandApprovalResolver.current = resolve
+          setCommandApproval({ id: uid('appr'), command, status: 'pending' })
         })
 
       let written: string[] = []
@@ -390,15 +401,25 @@ export default function App() {
           onToolEnd: (call, outcome: ToolOutcome) => {
             dispatch({ type: 'tool/end', messageId: assistantId, call, outcome })
           },
-          execute: (call) =>
-            executeTool(call, { inspector, project: projectRef.current }),
+          execute: (call) => {
+            // The agent's commands run through the same dev-server terminal as
+            // the panel's, in the bound folder when there is one.
+            const runCommand = makeRunCommandHandler({
+              files: projectRef.current.files,
+              cwd: folderRef.current ?? undefined,
+              signal: controller.signal,
+            })
+            return executeTool(call, { inspector, project: projectRef.current, runCommand })
+          },
           requestApproval,
+          requestCommandApproval,
         },
         controller.signal,
       )
 
       // A turn that ended while a card was still pending (abort) leaves nothing clickable.
       setApproval((current) => (current?.status === 'pending' ? null : current))
+      setCommandApproval((current) => (current?.status === 'pending' ? null : current))
 
       const content = pickReplyText({
         prose: result.prose,
@@ -448,6 +469,18 @@ export default function App() {
     approvalResolver.current?.(true)
     approvalResolver.current = null
     setApproval(null)
+  }, [])
+
+  const approveCommand = useCallback(() => {
+    commandApprovalResolver.current?.(true)
+    commandApprovalResolver.current = null
+    setCommandApproval((current) => (current ? { ...current, status: 'approved' } : current))
+  }, [])
+
+  const rejectCommand = useCallback(() => {
+    commandApprovalResolver.current?.(false)
+    commandApprovalResolver.current = null
+    setCommandApproval((current) => (current ? { ...current, status: 'rejected' } : current))
   }, [])
 
   const rejectFiles = useCallback(() => {
@@ -810,6 +843,9 @@ export default function App() {
           approval={approval}
           onApproveFiles={approveFiles}
           onRejectFiles={rejectFiles}
+          commandApproval={commandApproval}
+          onApproveCommand={approveCommand}
+          onRejectCommand={rejectCommand}
           files={state.project.files}
           onOpenFile={openFile}
           onUndo={undoLastTurn}

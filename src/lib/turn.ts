@@ -38,6 +38,9 @@ import {
 import type { ProjectFileInput } from './project'
 import type { ToolOutcome } from './tools'
 
+/** Tools whose every call the user must approve in ask mode before they run. */
+export const GATED_TOOLS: ReadonlySet<string> = new Set(['run_command'])
+
 export type TurnHooks = {
   /** Prose so far, with file and plan blocks removed. */
   onReply: (prose: string, filesWritten: string[]) => void
@@ -56,6 +59,11 @@ export type TurnHooks = {
    * Resolves true to apply, false when rejected (the model is told).
    */
   requestApproval?: (files: ProjectFileInput[]) => Promise<boolean>
+  /**
+   * Ask mode: commands need the user's explicit yes before they run, like the
+   * writes do. Resolves true to run, false when the user declined.
+   */
+  requestCommandApproval?: (command: string) => Promise<boolean>
   execute: (call: ToolCall) => Promise<ToolOutcome>
 }
 
@@ -249,6 +257,37 @@ export async function runAgentTurn(
 
     for (const call of calls) {
       hooks.onToolStart(call)
+
+      // Ask mode gates commands like writes: the user's yes comes first. A
+      // declined command reaches the model as a tool result, so the next step
+      // can pick a different way to verify.
+      if (isAsk && GATED_TOOLS.has(call.name)) {
+        const command = commandOf(call)
+        if (command !== null) {
+          const allowed = signal?.aborted
+            ? false
+            : await (hooks.requestCommandApproval
+                ? hooks.requestCommandApproval(command)
+                : Promise.resolve(false))
+          if (!allowed) {
+            toolCallsRun += 1
+            const outcome: ToolOutcome = {
+              ok: false,
+              summary: command,
+              text: `The user declined this command ("${command}"). Do not run it again; find another way to verify, or ask the user what to do.`,
+            }
+            hooks.onToolEnd(call, outcome)
+            stepTurns.push({
+              role: 'tool',
+              content: outcome.text,
+              toolCallId: call.id,
+              name: call.name,
+            })
+            continue
+          }
+        }
+      }
+
       const outcome = await hooks.execute(call)
       toolCallsRun += 1
       hooks.onToolEnd(call, outcome)
@@ -278,6 +317,18 @@ export async function runAgentTurn(
     spent,
     budget,
   }
+}
+
+/** The command a run_command call asks for, or null when there is none. */
+function commandOf(call: ToolCall): string | null {
+  if (call.name !== 'run_command') return null
+  try {
+    const parsed = JSON.parse(call.arguments || '{}') as { command?: unknown }
+    if (typeof parsed.command === 'string' && parsed.command.trim()) return parsed.command.trim()
+  } catch {
+    /* malformed arguments fall through to null */
+  }
+  return null
 }
 
 function settle(): Promise<void> {
