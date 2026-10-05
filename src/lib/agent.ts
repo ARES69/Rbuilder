@@ -210,13 +210,19 @@ export async function execCommand(
    * this it refuses to overwrite a file that changed outside the app.
    */
   synced = false,
+  /**
+   * True when a person pressed a button to publish their own work (the Git
+   * panel, Sync). The server refuses `git push` by default \u2014 that guardrail is
+   * about the agent, and only the agent's path leaves this false.
+   */
+  allowGitPush = false,
 ): Promise<{ ok: boolean; error?: string }> {
   let response: Response
   try {
     response = await fetch(apiUrl('/api/exec'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command, files, cwd, synced }),
+      body: JSON.stringify({ command, files, cwd, synced, allowGitPush }),
       signal,
     })
   } catch (error) {

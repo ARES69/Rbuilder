@@ -103,7 +103,10 @@ The checklist is re-emitted each turn and rendered with progress above the compo
 **Persistence.** Transcript, project, plan and mode are saved to `localStorage`; a reload keeps
 all of it. Terminal output and check results are session-only. **New project** starts over.
 
-**Resizable panes.** Drag the divider, or focus it and use ←/→. The width is remembered.
+**Resizable columns.** The shell is three columns — tasks, chat, inspector — and the outer two
+are yours to size: drag the handle, focus it and use ←/→ (shift for a bigger step), or
+double-click to hand the width back to the stylesheet. Both widths are remembered between
+launches, and a width saved on a wide monitor is clamped on a narrow one.
 
 ## How a turn works
 
@@ -163,6 +166,9 @@ capped at 10 MB; upstream calls time out after 20s (envelope can raise to 60s).
   commands (`sudo`, `doas`, `pkexec`, `-Verb RunAs`), fork bombs, disk writes, `git push` and
   deletes aimed outside the workspace are refused; commands have a 20 s timeout and 64 KB output
   cap. Anything stronger needs a container.
+- `git push` is refused *for the agent* and allowed for the person: the exec route carries a flag
+  only the Git panel and Sync set, so the guard is about who asked rather than what the command
+  looks like. A prompt that talks the model into publishing still cannot publish.
 - The agent has no shell tool: it can run the checks, not your machine.
 
 ## Cost
@@ -194,6 +200,23 @@ external URL, and a link to a file that does not exist. That last one matters �
 a dead link stays dead so the model can see it, rather than the preview silently
 "navigating" somewhere.
 
+## Where a project lives
+
+A new task gets a folder of its own without anybody being asked: the shell creates
+`Documents\RBuilder\<task name>`, taking the first free variant of that name, and
+the task is bound to it. Everything the model writes lands there, the terminal
+runs there, and git runs there — so the project is a folder you can open, back up
+and commit, not a state inside the app.
+
+The name is turned into a folder name that Windows will actually accept:
+characters no path segment may hold become dashes, trailing dots and spaces go,
+reserved device names (`con`, `NUL.txt`) are prefixed rather than suffixed, and
+an existing folder is never reused — a second `Новый проект` becomes
+`Новый проект 2` instead of quietly overwriting the first.
+
+**Open Folder** still binds a task to a folder you choose yourself, for a project
+that already exists.
+
 ## Git
 
 The Git panel runs real `git` in the **bound project folder** — the same folder
@@ -201,11 +224,47 @@ the model writes to and the terminal runs in, so what the panel reports can be
 verified outside the app. It gives status, a per-file diff, the recent history,
 branch switching and creation, tags, and push/pull.
 
-A task with no bound folder gets no Git panel. Its commands run in the scratch
+A task with no bound folder gets no git actions. Its commands run in the scratch
 copy at `.freebuff-workspace/project`, which is rewritten from scratch on every
 command: a repository created there would be thrown away with the next run, and
 until then the panel would report a branch and a history belonging to nothing.
 The panel says so instead of offering the actions.
+
+### GitHub and Sync
+
+The top of the Git panel signs in to GitHub and connects the folder to a
+repository. **Sign in** asks for a personal access token — a classic token with
+the `repo` scope — and **How to get a token** opens GitHub's own page for it. A
+device flow would be prettier, but it needs an OAuth application registered under
+someone's account; a flow that cannot be completed is worse than a field that
+says what it wants.
+
+The token is stored by the shell in its own data directory, not in web storage,
+and **Sign out** deletes the file.
+
+With an account connected you can create a new repository (private by default) or
+pick one of your existing ones, and the folder's `origin` is pointed at it.
+
+**Sync** is one button for both directions, and it does what a person does when
+they sit down with a working copy and a remote:
+
+1. create the repository if the folder has none yet,
+2. commit whatever is here,
+3. fetch,
+4. rebase onto `origin/<branch>` — or skip it, when the branch is not there yet,
+5. push.
+
+The order is the design: committing first makes the local work safe before the
+rebase can touch it, and pushing last means nothing is published until it is known
+to fit. A rebase that conflicts is not swept up — the files are left unmerged and
+the panel's conflict view takes over, so the next Sync finishes the job.
+
+Every step reports separately, because "sync failed" is not something anyone can
+act on. "GitHub refused the token" is.
+
+The token is never written into a remote URL: a URL in `.git/config` is a
+credential in plain text that every clone of the project inherits. Instead git is
+handed an `http.extraHeader` for the one command that needs it.
 
 ### Merge conflicts
 
@@ -292,8 +351,12 @@ src/lib/project.ts         virtual project, path safety, preview document builde
 src/lib/agent.ts           browser side of both streams
 src/lib/attachments.ts     file reading, text detection, truncation
 src/lib/store.ts           reducer + localStorage persistence
-src/components/            SplitLayout, ChatPanel, MessageList, Markdown, Composer,
-                           AttachmentChips, PreviewPane, Dock, PlanPanel
+src/lib/git.ts             git commands and output parsing
+src/lib/sync.ts            the one-button Sync, step by step
+src/lib/github.ts          GitHub REST client, repo names, git auth
+src/components/            ColumnResizer, SplitLayout, ChatPanel, MessageList, Markdown,
+                           Composer, AttachmentChips, PreviewPane, Dock, GitHubSync,
+                           PlanPanel
 src/styles/global.css      Minimalism theme (near-monochrome, hairline rules, dark mode)
 tests/                     Vitest suites
 ```
@@ -308,6 +371,7 @@ In dev the page exposes two aids:
 
 ## Not included
 
-Accounts and auth, a model picker, sessions and quotas, hosting and deployment, containers or a
-sandboxed terminal, multi-page apps and routing, git integration. The preview renders one
+Accounts and auth (the GitHub token is yours, pasted by you), hosted git — forges other than
+GitHub use whatever credentials the machine already has — a model picker, sessions and quotas,
+hosting and deployment, containers or a sandboxed terminal. The preview renders one
 self-contained HTML project; a build step and npm dependencies are out of scope by design.

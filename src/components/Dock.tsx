@@ -24,6 +24,7 @@ import {
   type GitState,
 } from '../lib/git'
 import type { PreviewEvent, PreviewInspector } from '../lib/inspector'
+import { GitHubSync } from './GitHubSync'
 import type { ConflictSide, GitChange } from '../lib/git'
 import type { Project, ProjectFile } from '../lib/project'
 import type { TerminalLine } from '../lib/store'
@@ -274,11 +275,11 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
   }, [refresh])
 
   const run = useCallback(
-    async (command: string, successNote: string) => {
+    async (command: string, successNote: string, allowGitPush = false) => {
       setBusy(true)
       setNote(null)
       const cwd = folderRef.current ?? undefined
-      const result = await runGit(command, files, undefined, cwd)
+      const result = await runGit(command, files, undefined, cwd, allowGitPush)
       // push and pull print their own diagnostics on stdout, and they are the
       // only useful part of the result, so a failure shows git's message.
       const detail = result.output.trim()
@@ -308,31 +309,6 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
   const changeCount = state?.changes.length ?? 0
 
   /**
-   * Git only makes sense against the bound folder.
-   *
-   * Without one the commands run in a scratch copy that is rewritten on every
-   * command, so a repository created there is thrown away with the next run, and
-   * until then the panel reports a branch and a history belonging to nothing.
-   * Offering the actions would let the user commit work into a directory that
-   * does not exist by tomorrow, so the panel says what is missing instead.
-   */
-  if (!isGitUsable(folderRef.current)) {
-    return (
-      <div className="git-panel">
-        <p className="dock-note">
-          Задача не привязана к папке, поэтому git здесь не работает: терминал выполняется во
-          временной копии проекта (<code>.freebuff-workspace/project</code>), которая
-          перезаписывается при каждой команде. Репозиторий в такой папке исчезнет вместе с ней.
-        </p>
-        <p className="dock-note">
-          Привяжите задачу к папке — и панель будет работать с вашим настоящим репозиторием:
-          статус, diff, история, ветки и push.
-        </p>
-      </div>
-    )
-  }
-
-  /**
    * Opens a file's diff. A deleted path has nothing left to diff against, so
    * the panel says so instead of showing an empty block that looks like a bug.
    */
@@ -354,8 +330,49 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
     [files],
   )
 
+  /**
+   * Git only makes sense against the bound folder.
+   *
+   * Without one the commands run in a scratch copy that is rewritten on every
+   * command, so a repository created there is thrown away with the next run, and
+   * until then the panel reports a branch and a history belonging to nothing.
+   * Offering the actions would let the user commit work into a directory that
+   * does not exist by tomorrow, so the panel says what is missing instead.
+   */
+  if (!isGitUsable(folderRef.current)) {
+    return (
+      <div className="git-panel">
+        {/* Signing in and connecting a repository do not need a bound folder,
+            and the folder a task gets can change at any time — so the GitHub
+            block is here either way, and only the git actions below it wait. */}
+        <GitHubSync
+          files={files}
+          folder={folderRef.current}
+          remote={extra?.remote ?? null}
+          onRemoteChanged={() => void refresh()}
+        />
+        <p className="dock-note">
+          Задача не привязана к папке, поэтому git здесь не работает: терминал выполняется во
+          временной копии проекта (<code>.freebuff-workspace/project</code>), которая
+          перезаписывается при каждой команде. Репозиторий в такой папке исчезнет вместе с ней.
+        </p>
+        <p className="dock-note">
+          Привяжите задачу к папке — и панель будет работать с вашим настоящим репозиторием:
+          статус, diff, история, ветки и push.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="git-panel">
+      <GitHubSync
+        files={files}
+        folder={folderRef.current}
+        remote={extra?.remote ?? null}
+        onRemoteChanged={() => void refresh()}
+      />
+
       <div className="panel-actions">
         <span className="panel-status">
           {tone === 'missing'
@@ -400,7 +417,7 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
               className="button button--quiet"
               disabled={busy || !extra?.remote}
               title={extra?.remote ? `Отправить в ${extra.remote}` : 'У репозитория нет remote origin'}
-              onClick={() => void run(GIT_PUSH_COMMAND, 'Отправлено в origin.')}
+              onClick={() => void run(GIT_PUSH_COMMAND, 'Отправлено в origin.', true)}
             >
               Push
             </button>

@@ -49,6 +49,72 @@ export async function pickProjectFolderPath(): Promise<string | null> {
   return invoke<string | null>('pick_project_folder')
 }
 
+/**
+ * The folder a new task is given without anybody being asked: the shell creates
+ * `Documents\RBuilder\<name>`, picking the first free variant of that name, and
+ * answers with the folder it took. `name` is the task name — the folder ends up
+ * called exactly what the task is called in the rail.
+ */
+export async function ensureProjectFolder(
+  name: string,
+): Promise<{ path: string; name: string }> {
+  return invoke<{ path: string; name: string }>('ensure_project_folder', { name })
+}
+
+/* ------------------------------------------------------------------ */
+/* Credentials                                                        */
+/* ------------------------------------------------------------------ */
+
+/** Where the browser build keeps the GitHub token; the shell has its own file. */
+const BROWSER_TOKEN_KEY = 'rbuilder:github-token'
+
+/**
+ * The stored GitHub token, or null. The desktop shell keeps it in the app data
+ * directory rather than in web storage, so anything that can run script in the
+ * window cannot read it.
+ */
+export async function readGitHubToken(): Promise<string | null> {
+  if (isDesktop()) {
+    try {
+      return await invoke<string | null>('github_token_get')
+    } catch {
+      return null
+    }
+  }
+  try {
+    return window.localStorage.getItem(BROWSER_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+/** Stores the GitHub token, or forgets it when given null (signing out). */
+export async function writeGitHubToken(token: string | null): Promise<void> {
+  if (isDesktop()) {
+    await invoke<void>('github_token_set', { token })
+    return
+  }
+  try {
+    if (token) window.localStorage.setItem(BROWSER_TOKEN_KEY, token)
+    else window.localStorage.removeItem(BROWSER_TOKEN_KEY)
+  } catch {
+    /* the browser build keeps the token for the session only if storage is refused */
+  }
+}
+
+/**
+ * Opens a page in the person's own browser rather than inside the webview.
+ * A webview has no address bar to show where the link goes, which is exactly
+ * what someone needs to know before pasting a token into it.
+ */
+export async function openExternal(url: string): Promise<void> {
+  if (isDesktop()) {
+    await invoke<void>('open_external', { url })
+    return
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 /** Reads a bound folder from disk without a dialog (the desktop re-read). */
 export async function readProjectFolder(path: string): Promise<ImportedFolder> {
   const payload = await invoke<{ name: string; files: ImportedFile[] }>('read_project_files', { path })
