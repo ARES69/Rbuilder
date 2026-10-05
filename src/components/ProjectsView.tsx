@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react'
+import { withCount } from '../lib/plural'
 import type { Workspace } from '../lib/workspace'
 
 type Props = {
@@ -15,6 +17,54 @@ type Props = {
  * Every workspace the app has kept, with what it actually holds. The list is the
  * same one the sidebar switcher uses; nothing here is invented.
  */
+/**
+ * `1 сохранён`, but `2 сохранено` and `5 сохранено`: a short passive form agrees
+ * with the thing counted, and only the single takes the masculine one.
+ */
+function saved(count: number): string {
+  return count === 1 ? '1 сохранён' : `${count} сохранено`
+}
+
+/**
+ * The name, edited in place.
+ *
+ * It used to be `window.prompt`, which is a dialog the app cannot style, that
+ * opens behind the window on some systems, and that discards the name the moment
+ * it is cancelled. Enter commits, Escape returns, blur commits — the same thing
+ * a rename field does everywhere else.
+ */
+function RenameField({ name, onDone }: { name: string; onDone: (name: string | null) => void }) {
+  const [value, setValue] = useState(name)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [])
+
+  return (
+    <input
+      ref={inputRef}
+      className="project-rename-input"
+      value={value}
+      aria-label="Название проекта"
+      placeholder="Название проекта"
+      onChange={(event) => setValue(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          onDone(value.trim() ? value : null)
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          onDone(null)
+        }
+      }}
+      onBlur={() => onDone(value.trim() ? value : null)}
+    />
+  )
+}
+
 export function ProjectsView({
   workspaces,
   activeId,
@@ -25,6 +75,14 @@ export function ProjectsView({
   onImportFolder,
   importing,
 }: Props) {
+  const [renaming, setRenaming] = useState<string | null>(null)
+
+  /** Commits the edited name, or leaves it alone when the edit was cancelled. */
+  const finishRename = (id: string, name: string | null) => {
+    setRenaming(null)
+    if (name) onRename(id, name)
+  }
+
   return (
     <main className="desktop-home">
       <header className="desktop-home-head">
@@ -50,7 +108,7 @@ export function ProjectsView({
         <div className="desktop-section-head">
           <div>
             <h2>Все проекты</h2>
-            <p>{workspaces.length > 0 ? `${workspaces.length} сохранено` : 'Пока ничего не сохранено'}</p>
+            <p>{workspaces.length > 0 ? saved(workspaces.length) : 'Пока ничего не сохранено'}</p>
           </div>
         </div>
 
@@ -61,28 +119,39 @@ export function ProjectsView({
           </p>
         ) : (
           <ul className="project-list">
-            {workspaces.map((entry) => (
-              <li key={entry.metadata.id} className={`project-row${entry.metadata.id === activeId ? ' project-row--active' : ''}`}>
+            {workspaces.map((entry) => {
+              const isActive = entry.metadata.id === activeId
+              return (
+              <li key={entry.metadata.id} className={`project-row${isActive ? ' project-row--active' : ''}`}>
                 <span className="workspace-card-icon" aria-hidden="true">⌘</span>
                 <div className="project-row-main">
-                  <strong>{entry.metadata.name}</strong>
-                  <span>
-                    {entry.project.files.length} файлов · {new Date(entry.metadata.updatedAt).toLocaleString()}
+                  {renaming === entry.metadata.id ? (
+                    <RenameField name={entry.metadata.name} onDone={(name) => finishRename(entry.metadata.id, name)} />
+                  ) : (
+                    <strong>{entry.metadata.name}</strong>
+                  )}
+                  <span title={entry.metadata.localPath ?? undefined}>
+                    {withCount(entry.project.files.length, 'файл', 'файла', 'файлов')} · {new Date(entry.metadata.updatedAt).toLocaleString()}
                     {entry.metadata.localPath ? ` · ${entry.metadata.localPath}` : ''}
                   </span>
                 </div>
                 <span className="workspace-branch">{entry.metadata.activeBranch}</span>
+                {isActive ? <span className="project-row-current">Текущий</span> : null}
                 <div className="project-row-actions">
-                  <button type="button" className="button button--quiet" onClick={() => onOpen(entry.metadata.id)}>
-                    {entry.metadata.id === activeId ? 'Открыть' : 'Переключиться'}
+                  <button
+                    type="button"
+                    className="button button--quiet"
+                    disabled={isActive}
+                    onClick={() => onOpen(entry.metadata.id)}
+                    title={isActive ? 'Этот проект уже открыт' : 'Открыть проект в рабочей области'}
+                  >
+                    Открыть
                   </button>
                   <button
                     type="button"
                     className="button button--quiet"
-                    onClick={() => {
-                      const name = window.prompt('Название проекта', entry.metadata.name)
-                      if (name && name.trim()) onRename(entry.metadata.id, name.trim())
-                    }}
+                    disabled={renaming === entry.metadata.id}
+                    onClick={() => setRenaming(entry.metadata.id)}
                   >
                     Переименовать
                   </button>
@@ -96,7 +165,8 @@ export function ProjectsView({
                   </button>
                 </div>
               </li>
-            ))}
+              )
+            })}
           </ul>
         )}
       </section>

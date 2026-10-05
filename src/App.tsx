@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react'
 import { InspectorPanel, type InspectorTab } from './components/InspectorPanel'
+import { ProjectsView } from './components/ProjectsView'
 import { ColumnResizer, readStoredColumnWidth, storeColumnWidth } from './components/ColumnResizer'
 import type { Approval, CommandApproval } from './components/ApprovalPanel'
 import { ChatPanel } from './components/ChatPanel'
@@ -88,15 +89,14 @@ import {
 } from './lib/store'
 
 type View = 'workspace' | 'projects'
-type NavId = 'workspace' | 'projects' | 'settings'
 
 /** Where the two resizable columns remember their width between launches. */
 const RAIL_WIDTH_KEY = 'rbuilder:rail-width'
 const INSPECTOR_WIDTH_KEY = 'rbuilder:inspector-width'
 
 /** The widths the stylesheet asks for, and the room the chat keeps. */
-const RAIL_DEFAULT_WIDTH = 232
-const INSPECTOR_DEFAULT_WIDTH = 400
+const RAIL_DEFAULT_WIDTH = 224
+const INSPECTOR_DEFAULT_WIDTH = 380
 /** Chat, plus the other panel's narrowest form, plus the gutters. */
 const RAIL_RESERVE = 720
 const INSPECTOR_RESERVE = 640
@@ -115,8 +115,7 @@ export default function App() {
   const [dockTab, setDockTab] = useState<DockTab>('files')
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [runningChecks, setRunningChecks] = useState(false)
-  const [, setView] = useState<View>('workspace')
-  const [, setActiveNav] = useState<NavId>('workspace')
+  const [view, setView] = useState<View>('workspace')
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('inspector')
   /** A changed file asked for by the transcript or the inspector. */
   const [focusFile, setFocusFile] = useState<string | null>(null)
@@ -793,6 +792,36 @@ export default function App() {
     void refreshFromFolder(next).then(applyWorkspace)
   }, [workspaces, workspace.metadata.id, refreshFromFolder, applyWorkspace])
 
+  /**
+   * Renames the task, not its folder.
+   *
+   * The folder on disk keeps the name it was created with: renaming it here
+   * would silently move a directory the user may have open elsewhere, and a
+   * project that half-moved is worse than one with a stale folder name.
+   */
+  const renameWorkspace = useCallback((id: string, name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const rename = (entry: Workspace): Workspace =>
+      entry.metadata.id === id
+        ? { ...entry, metadata: { ...entry.metadata, name: trimmed, updatedAt: Date.now() } }
+        : entry
+    setWorkspaces((entries) => entries.map(rename))
+    setWorkspace(rename)
+  }, [])
+
+  /** Removes a task from the list. Closing the open one lands on another. */
+  const deleteWorkspace = useCallback((id: string) => {
+    if (busyRef.current) return
+    const rest = workspacesRef.current.filter((entry) => entry.metadata.id !== id)
+    // The last task stays: an app with nothing open has nothing to show.
+    if (rest.length === 0 || rest.length === workspacesRef.current.length) return
+    setWorkspaces(rest)
+    if (id === workspace.metadata.id) {
+      void refreshFromFolder(rest[0]).then(applyWorkspace)
+    }
+  }, [workspace.metadata.id, refreshFromFolder, applyWorkspace])
+
   // Launch: the open task's folder is read once, so a project edited outside
   // the app starts in sync instead of resurrecting a stale virtual copy.
   const startupRefreshed = useRef(false)
@@ -1148,9 +1177,9 @@ const reset = useCallback(async () => {
         onOpenSettings={() => setSettingsOpen(true)}
         onSelect={switchWorkspace}
         onNewTask={reset}
-        onOpenWorkspace={() => { setActiveNav('workspace'); setView('workspace') }}
+        onOpenWorkspace={() => setView('workspace')}
         onImportFolder={() => void openLocalFolder()}
-        onOpenProjects={() => { setActiveNav('projects'); setView('projects') }}
+        onOpenProjects={() => setView('projects')}
         onExportProject={() => void exportProject()}
         onImportArchive={() => archiveInputRef.current?.click()}
       />
@@ -1167,6 +1196,30 @@ const reset = useCallback(async () => {
         label="Ширина панели задач"
       />
 
+      {/*
+        The rail stays on both screens — it is where every task and every
+        destination is. What the projects screen replaces is the work area:
+        chat and inspector, and the handles that only make sense with them.
+      */}
+      {view === 'projects' ? (
+        <ProjectsView
+          workspaces={workspaces.length > 0 ? workspaces : [workspace]}
+          activeId={workspace.metadata.id}
+          onOpen={(id) => {
+            switchWorkspace(id)
+            setView('workspace')
+          }}
+          onRename={renameWorkspace}
+          onDelete={deleteWorkspace}
+          onCreate={() => {
+            void reset()
+            setView('workspace')
+          }}
+          onImportFolder={() => void openLocalFolder()}
+          importing={importing}
+        />
+      ) : (
+        <>
       <section className="zcode-chat" aria-label="Чат с агентом">
         <header className="zcode-chat-head">
           <h1 className="zcode-chat-title">{workspace.metadata.name}</h1>
@@ -1286,6 +1339,8 @@ const reset = useCallback(async () => {
         onOpenFile={openFile}
         focusFile={focusFile}
       />
+        </>
+      )}
 
       {browserSessionOpen ? <BrowserSessionPanel onClose={() => setBrowserSessionOpen(false)} /> : null}
       <input
@@ -1339,12 +1394,12 @@ function pickReplyText(input: {
 }): string {
   const prose = input.prose.trim()
   if (prose) return prose
-  if (input.stopped) return 'Stopped.'
+  if (input.stopped) return 'Остановлено.'
   if (input.error) return input.error
   if (input.filesWritten > 0) {
-    return input.filesWritten === 1 ? 'Wrote 1 file.' : `Wrote ${input.filesWritten} files.`
+    return input.filesWritten === 1 ? 'Записан 1 файл.' : `Записано файлов: ${input.filesWritten}.`
   }
-  return input.ok ? 'Done.' : 'No response.'
+  return input.ok ? 'Готово.' : 'Пустой ответ.'
 }
 
 function loadActiveProviderId(): string {
