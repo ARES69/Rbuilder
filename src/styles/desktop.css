@@ -46,6 +46,9 @@
 .project-row-main strong { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-row-main span { color: var(--fg-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-row-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+/* The open task says so once, instead of its button changing its own verb. */
+.project-row-current { flex: none; padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--fg-muted); font-size: 10.5px; }
+.project-rename-input { width: 100%; padding: 3px 6px; border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--bg-inset); color: var(--fg); font-size: 13px; outline: none; }
 .workspace-branch--ok { color: #6e9658; border-color: #6e9658; }
 .workspace-branch--idle { color: var(--fg-faint); }
 @media (max-width: 900px) { .project-row { flex-wrap: wrap; } }

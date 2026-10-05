@@ -102,8 +102,8 @@ export function SettingsPanel({ profiles, activeId, onActiveChange, onSave, onCl
               <label className="settings-label">Путь чата<input className="settings-input" value={draft.chatPath ?? '/chat/completions'} onChange={(event) => update({ chatPath: event.target.value })} /></label>
               <label className="settings-label">Путь списка моделей<input className="settings-input" value={draft.modelsPath ?? '/models'} onChange={(event) => update({ modelsPath: event.target.value })} /></label>
             </div>
-            <label className="settings-label">Заголовок авторизации <span className="settings-optional">use {'{{apiKey}}'} as a placeholder</span><input className="settings-input" value={draft.authHeader ?? 'Authorization: Bearer {{apiKey}}'} onChange={(event) => update({ authHeader: event.target.value })} /></label>
-            <label className="settings-label">Дополнительные заголовки <span className="settings-optional">JSON object</span><textarea className="settings-input settings-textarea" value={draft.extraHeaders ?? ''} onChange={(event) => update({ extraHeaders: event.target.value })} placeholder={'{\"X-API-Key\":\"{{apiKey}}\"}'} /></label>
+            <label className="settings-label">Заголовок авторизации <span className="settings-optional">подставьте {'{{apiKey}}'} вместо ключа</span><input className="settings-input" value={draft.authHeader ?? 'Authorization: Bearer {{apiKey}}'} onChange={(event) => update({ authHeader: event.target.value })} /></label>
+            <label className="settings-label">Дополнительные заголовки <span className="settings-optional">объект JSON</span><textarea className="settings-input settings-textarea" value={draft.extraHeaders ?? ''} onChange={(event) => update({ extraHeaders: event.target.value })} placeholder={'{\"X-API-Key\":\"{{apiKey}}\"}'} /></label>
           </div>
         ) : null}
 

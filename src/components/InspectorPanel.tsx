@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { ChecksResult } from '../lib/checks'
 import { lineDiff, totalDiff } from '../lib/diff'
 import { fileGlyph, fileGlyphClass } from '../lib/fileIcons'
+import { plural, withCount } from '../lib/plural'
 import type { PreviewInspector } from '../lib/inspector'
 import type { PageLink } from '../lib/pages'
 import type { Project } from '../lib/project'
@@ -238,19 +239,14 @@ export function InspectorPanel(props: Props) {
   )
 }
 
-/** `1 файл`, `2 файла`, `5 файлов` — Russian counts, not `1 файлов`. */
+/** `1 файл`, `2 файла`, `5 файлов` under a changed-file count. */
 function files(count: number): string {
-  if (count % 10 === 1 && count % 100 !== 11) return `${count} файл`
-  if (count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14)) return `${count} файла`
-  return `${count} файлов`
+  return plural(count, 'файл', 'файла', 'файлов')
 }
 
-/** The same, for the check findings. */
+/** What the checks row says: nothing found, or how many findings there are. */
 function findings(count: number): string {
-  if (count === 0) return 'всё чисто'
-  if (count % 10 === 1 && count % 100 !== 11) return `${count} замечание`
-  if (count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14)) return `${count} замечания`
-  return `${count} замечаний`
+  return count === 0 ? 'всё чисто' : withCount(count, 'замечание', 'замечания', 'замечаний')
 }
 
 function describeGoal(project: Project): string {
