@@ -306,11 +306,6 @@ select {
   color: var(--fg);
 }
 
-.pane-subtitle {
-  font-size: 11.5px;
-  color: var(--fg-faint);
-}
-
 .pane-header-end {
   display: flex;
   align-items: center;
@@ -394,10 +389,22 @@ select {
 }
 
 .turn-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   font-size: 11px;
   font-weight: 600;
   color: var(--fg-faint);
   letter-spacing: 0.02em;
+}
+
+/* How many identical copies of one message the model produced. */
+.turn-repeat {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .turn-text {
@@ -667,6 +674,10 @@ select {
 }
 
 .composer-box {
+  /* A container of its own width: the hint below is decided by how much room
+     the controls leave, which no viewport width can answer. */
+  container-type: inline-size;
+  container-name: composer;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--bg-input);
@@ -676,6 +687,14 @@ select {
   gap: var(--space-3);
   transition: border-color 120ms ease;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* Narrower than this, a hint has no room to be a hint — it would be an
+   ellipsis. It goes instead; the mode tooltips still explain everything. */
+@container composer (max-width: 620px) {
+  .composer-hint {
+    display: none;
+  }
 }
 
 .composer-box:focus-within {
@@ -704,16 +723,28 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+  /* In a narrow column the mode switch and the model pickers do not both fit on
+     one line. Wrapping moves the pickers to their own line instead of clipping
+     the mode labels mid-word. */
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 .composer-actions-left {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  /* A stated basis, not the content width: the row must break by how much room
+     the controls need, not by how long the hint sentence happens to be. */
+  flex: 1 1 240px;
   min-width: 0;
 }
 
 .composer-hint {
+  /* A hint, not a control: it gives up width before anything else does, so it
+     can never be what pushes the model pickers onto their own line. */
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 11.5px;
   color: var(--fg-faint);
   overflow: hidden;
@@ -726,6 +757,7 @@ select {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  flex: 0 1 auto;
   min-width: 0;
   color: var(--fg-muted);
 }
@@ -945,6 +977,11 @@ select {
 /* ------------------------------------------------------------------ */
 
 .dock {
+  /* A container of its own width: the dock sits under a full-width preview and
+     inside a narrow inspector column at the same time, and its layout depends
+     on which of the two it is. */
+  container-type: inline-size;
+  container-name: dock;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -963,10 +1000,12 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  height: 40px;
-  padding: 0 var(--space-4);
+  min-height: 40px;
+  padding: 4px var(--space-4);
   border-bottom: 1px solid var(--line);
   flex: none;
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 
 .dock--collapsed .dock-bar {
@@ -978,7 +1017,10 @@ select {
   align-items: center;
   gap: var(--space-4);
   min-width: 0;
-  overflow: hidden;
+  /* Wrap onto a second line rather than clip a tab in half: in the inspector
+     column there is room for all five, just not on one row. */
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 
 .tab {
@@ -1442,6 +1484,8 @@ select {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4) var(--space-2);
   flex: none;
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
 }
 
 .file-editor-path {
@@ -1457,6 +1501,8 @@ select {
   display: flex;
   gap: var(--space-2);
   flex: none;
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
 }
 
 .file-editor-input {
@@ -1479,6 +1525,32 @@ select {
 
 .file-editor-input:focus {
   border-color: var(--accent);
+}
+
+/*
+ * Narrow dock: the file list stops being a column and becomes a row above the
+ * editor. Side by side at this width, the editor and its buttons were cut off
+ * at the right edge with no way to scroll to them. Measured by the dock's own
+ * width, not the window's — the same dock is full width under the preview and
+ * 380px inside the inspector column.
+ */
+@container dock (max-width: 520px) {
+  .files {
+    flex-direction: column;
+  }
+
+  .file-list-wrap {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    max-height: 42%;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .file-editor {
+    min-height: 0;
+  }
 }
 
 /* Console and checks --- */
@@ -1761,7 +1833,7 @@ select {
   appearance: none;
   border: 0;
   background: none;
-  padding: 6px 12px;
+  padding: 6px 10px;
   font-size: 12px;
   color: var(--fg-faint);
   cursor: pointer;

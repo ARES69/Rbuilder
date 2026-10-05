@@ -4,6 +4,7 @@ import { Markdown } from './Markdown'
 import { lineDiff, totalDiff } from '../lib/diff'
 import { fileGlyph, fileGlyphClass } from '../lib/fileIcons'
 import type { ChatMessage, ToolTraceEntry } from '../lib/store'
+import { collapseRepeats } from '../lib/transcript'
 
 type Props = {
   messages: ChatMessage[]
@@ -167,6 +168,9 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
     endRef.current?.scrollIntoView({ block: 'end' })
   }, [messages])
 
+  // The same sentence twice in a row is one answer repeated, not two.
+  const rows = useMemo(() => collapseRepeats(messages), [messages])
+
   // Undo belongs to the newest turn that wrote something: older snapshots would
   // clobber whatever later turns did to the same files.
   const lastTurnId = useMemo(
@@ -202,13 +206,20 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
 
   return (
     <div className="transcript">
-      {messages.map((message) => {
-        const rows = turnFileRows(message, files)
-        const streamingFiles = message.role === 'assistant' && message.status === 'streaming' && rows.length > 0
+      {rows.map(({ message, repeats }) => {
+        const fileRows = turnFileRows(message, files)
+        const streamingFiles = message.role === 'assistant' && message.status === 'streaming' && fileRows.length > 0
 
         return (
           <article key={message.id} className={`turn turn--${message.role}`}>
-            <div className="turn-meta">{message.role === 'user' ? 'Вы' : 'RBUILDER'}</div>
+            <div className="turn-meta">
+              <span>{message.role === 'user' ? 'Вы' : 'RBUILDER'}</span>
+              {repeats > 1 ? (
+                <span className="turn-repeat" title="Одинаковых сообщений подряд">
+                  повтор ×{repeats}
+                </span>
+              ) : null}
+            </div>
 
             <div className="turn-body">
               {message.content ? <MessageContent content={message.content} compact={message.role === 'user'} /> : null}
@@ -220,7 +231,7 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
               {streamingFiles ? (
                 <p className="run-inline">
                   <span className="run-verb">Обновил</span>
-                  {rows.map((row) => (
+                  {fileRows.map((row) => (
                     <span key={row.path} className="run-inline-file">
                       <span className={`file-glyph file-glyph--${fileGlyphClass(row.path)}`} aria-hidden="true">
                         {fileGlyph(row.path)}
@@ -243,10 +254,10 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
 
             {message.attachments?.length ? <AttachmentChips attachments={message.attachments} /> : null}
 
-            {message.role === 'assistant' && message.status !== 'streaming' && rows.length > 0 ? (
+            {message.role === 'assistant' && message.status !== 'streaming' && fileRows.length > 0 ? (
               <ChangesCard
                 message={message}
-                rows={rows}
+                rows={fileRows}
                 canUndo={message.id === lastTurnId && !message.undone}
                 onOpenFile={onOpenFile}
                 onUndo={onUndo}

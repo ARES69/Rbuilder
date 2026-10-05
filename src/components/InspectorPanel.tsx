@@ -68,7 +68,7 @@ export function InspectorPanel(props: Props) {
     [project.files, baselineProject.files],
   )
 
-  /** Per-file +N -N, the way the Git tools card shows them. */
+  /** Per-file +N -N, the way the Git card shows them. */
   const fileDiffs = useMemo(
     () =>
       changed.map((file) => {
@@ -96,13 +96,13 @@ export function InspectorPanel(props: Props) {
     <div className="inspector-card">
       <section className="inspector-block">
         <header className="inspector-block-head">
-          <h3>Git tools</h3>
+          <h3>Git</h3>
         </header>
         <button type="button" className="inspector-row" onClick={() => { onTabChange('code'); props.onDockTabChange('git') }}>
           <span className="inspector-row-icon" aria-hidden="true">▣</span>
           <span className="inspector-row-main">
-            <strong>Changes</strong>
-            <small>{changed.length === 0 ? 'нет изменений' : `${changed.length} файлов`}</small>
+            <strong>Изменения</strong>
+            <small>{changed.length === 0 ? 'нет изменений' : `${files(changed.length)} изменён`}</small>
           </span>
           <span className="inspector-diff">
             <em className="inspector-add">+{totals.added}</em> <em className="inspector-del">−{totals.removed}</em>
@@ -133,31 +133,37 @@ export function InspectorPanel(props: Props) {
         <div className="inspector-row inspector-row--static">
           <span className="inspector-row-icon" aria-hidden="true">✓</span>
           <span className="inspector-row-main">
-            <strong>Checks</strong>
-            <small>{checks ? `${checks.findings.length} замечаний` : 'не запускались'}</small>
+            <strong>Проверки</strong>
+            <small>{checks ? findings(checks.findings.length) : 'не запускались'}</small>
           </span>
-          <button type="button" className="inspector-run" onClick={props.onRunChecks} disabled={props.runningChecks}>
-            {props.runningChecks ? '…' : 'Run'}
+          <button
+            type="button"
+            className="inspector-run"
+            onClick={props.onRunChecks}
+            disabled={props.runningChecks}
+            title="Запустить проверки структуры, синтаксиса и обязательных файлов"
+          >
+            {props.runningChecks ? '…' : 'Запустить'}
           </button>
         </div>
       </section>
 
       <section className="inspector-block">
         <header className="inspector-block-head">
-          <h3>Goal</h3>
-          {complete ? <span className="inspector-badge">Complete</span> : null}
+          <h3>Цель</h3>
+          {complete ? <span className="inspector-badge">Готово</span> : null}
         </header>
         <div className="inspector-goal">
           <span className="inspector-goal-icon" aria-hidden="true">◎</span>
           <p>{describeGoal(project)}</p>
         </div>
         <div className="inspector-progress">
-          <span className="inspector-progress-label">Progress</span>
+          <span className="inspector-progress-label">Прогресс</span>
           <span className="inspector-progress-value">
             {props.plan.length > 0
-              ? `${doneCount}/${steps.length}${changed.length > 0 ? ` · ${changed.length} файлов` : ''}`
+              ? `${doneCount}/${steps.length}${changed.length > 0 ? ` · ${files(changed.length)} изменён` : ''}`
               : changed.length > 0
-                ? `${changed.length} файлов изменено`
+                ? `${files(changed.length)} изменён`
                 : 'ожидание первой задачи'}
           </span>
         </div>
@@ -168,14 +174,10 @@ export function InspectorPanel(props: Props) {
         </ul>
       </section>
 
-      <div className="inspector-tabs-bottom">
-        <button type="button" className={`inspector-tab${tab === 'preview' ? ' inspector-tab--active' : ''}`} onClick={() => onTabChange('preview')}>
-          ◱ Превью
-        </button>
-        <button type="button" className={`inspector-tab${tab === 'code' ? ' inspector-tab--active' : ''}`} onClick={() => onTabChange('code')}>
-          ⇥ Код
-        </button>
-      </div>
+      {/*
+        The card used to end with its own «Превью» and «Код» buttons, repeating
+        the switch directly above them in the same column.
+      */}
     </div>
   )
 
@@ -234,6 +236,21 @@ export function InspectorPanel(props: Props) {
       ) : null}
     </aside>
   )
+}
+
+/** `1 файл`, `2 файла`, `5 файлов` — Russian counts, not `1 файлов`. */
+function files(count: number): string {
+  if (count % 10 === 1 && count % 100 !== 11) return `${count} файл`
+  if (count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14)) return `${count} файла`
+  return `${count} файлов`
+}
+
+/** The same, for the check findings. */
+function findings(count: number): string {
+  if (count === 0) return 'всё чисто'
+  if (count % 10 === 1 && count % 100 !== 11) return `${count} замечание`
+  if (count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14)) return `${count} замечания`
+  return `${count} замечаний`
 }
 
 function describeGoal(project: Project): string {

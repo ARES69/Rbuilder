@@ -146,6 +146,26 @@ export function describeCost(result: CostResult): string {
   }
 }
 
+/**
+ * The cost as far as it fits next to the model picker.
+ *
+ * `describeCost` is a sentence with a token count in it, and a sentence in the
+ * composer row either gets clipped mid-word or pushes the send button off the
+ * line. What is left is a badge; the sentence stays in the tooltip.
+ */
+export function shortCost(result: CostResult): string {
+  switch (result.kind) {
+    case 'free':
+      return 'локально'
+    case 'priced':
+      return formatCost(result.cost)
+    case 'unpriced':
+      return 'цена ?'
+    case 'unknown':
+      return 'нет данных'
+  }
+}
+
 /** Running total for a session, kept in one place so the arithmetic agrees. */
 export type SessionSpend = {
   cost: number

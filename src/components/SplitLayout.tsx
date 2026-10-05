@@ -90,7 +90,7 @@ export function SplitLayout({ left, right }: Props) {
         className="divider"
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize panels"
+        aria-label="Ширина панелей"
         tabIndex={0}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

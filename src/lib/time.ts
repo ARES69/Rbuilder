@@ -21,3 +21,29 @@ export function relativeTime(from: number, now = Date.now()): string {
 
   return `${Math.round(months / 12)}y`
 }
+
+/**
+ * The same age, said in the language the interface is in.
+ *
+ * The rail sits next to Russian labels, and `20m` next to «Новая задача» reads
+ * as a leftover from a different program. Short on purpose: the name of the task
+ * has to survive next to it.
+ */
+export function relativeTimeRu(from: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - from) / 1000))
+  if (seconds < 45) return `${Math.max(1, seconds)} с`
+
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} мин`
+
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} ч`
+
+  const days = Math.round(hours / 24)
+  if (days < 30) return `${days} д`
+
+  const months = Math.round(days / 30)
+  if (months < 12) return `${months} мес`
+
+  return `${Math.round(months / 12)} г`
+}

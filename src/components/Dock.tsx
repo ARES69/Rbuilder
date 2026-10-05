@@ -170,8 +170,11 @@ function FilesPanel({ project, onWriteFile, onDeleteFile, onAskAgent }: DockProp
             type="checkbox"
             checked={listOpen}
             onChange={(event) => setListOpen(event.target.checked)}
+            aria-label="Показать список файлов"
           />
-          <span className="file-list-toggle-label">Файлы</span>
+          {/* No word here: the tab directly above already says "Файлы", and a
+              label repeated twice reads as two different things. */}
+          <span className="file-list-glyph" aria-hidden="true">▤</span>
         </label>
         {listOpen ? (
           <ul className="file-list">
@@ -455,19 +458,19 @@ function GitPanel({ project, baselineProject, folder }: DockProps) {
               type="button"
               className="button button--quiet"
               disabled={busy || !extra?.remote}
-              title={extra?.remote ? `Отправить в ${extra.remote}` : 'У репозитория нет remote origin'}
+              title={extra?.remote ? `Отправить коммиты в ${extra.remote} (git push)` : 'У репозитория нет remote origin'}
               onClick={() => void run(GIT_PUSH_COMMAND, 'Отправлено в origin.', true)}
             >
-              Push
+              Отправить
             </button>
             <button
               type="button"
               className="button button--quiet"
               disabled={busy || !extra?.remote}
-              title={extra?.remote ? 'Обновить из origin' : 'У репозитория нет remote origin'}
+              title={extra?.remote ? 'Забрать коммиты из origin (git pull)' : 'У репозитория нет remote origin'}
               onClick={() => void run(GIT_PULL_COMMAND, 'Получено из origin.')}
             >
-              Pull
+              Получить
             </button>
           </>
         )}
