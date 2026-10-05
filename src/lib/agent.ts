@@ -98,6 +98,41 @@ export const UNCONFIGURED_HINT =
   'instead, add OPENAI_API_KEY (optionally OPENAI_BASE_URL / OPENAI_MODEL) to ' +
   '.env.local and restart the server. The preview keeps rendering the project in the meantime.'
 
+/**
+ * Whether a profile can carry a request as it stands.
+ *
+ * Ollama and LM Studio run on the user's own machine, which is the whole point
+ * of the app working without an account, so a missing key does not disqualify
+ * them — every other provider needs one.
+ */
+export function isProfileReady(profile: ProviderProfile): boolean {
+  if (!profile.baseUrl.trim() || !profile.model.trim()) return false
+  if (profile.apiKey.trim()) return true
+  return profile.kind === 'ollama' || profile.kind === 'lmstudio'
+}
+
+/**
+ * What the interface should say about the model connection.
+ *
+ * The active profile is what actually travels with every request, so its
+ * completeness is the authority here. The server's own configuration is the
+ * fallback for the case where the browser holds no usable profile but the
+ * server was started with a key.
+ *
+ * Deciding this in one place rather than in two effects is the point: both
+ * wrote the same flag, the server's answer arrived a beat later, and the
+ * composer sat there saying "not configured" with a perfectly good provider
+ * selected until the user touched the dropdown to make it re-run.
+ */
+export function resolveModelConfig(
+  profile: ProviderProfile,
+  server: AgentConfig | null,
+): { configured: boolean; model?: string } {
+  if (isProfileReady(profile)) return { configured: true, model: profile.model }
+  if (server?.configured) return { configured: true, model: server.model }
+  return { configured: false }
+}
+
 export async function fetchAgentConfig(signal?: AbortSignal): Promise<AgentConfig> {
   try {
     const response = await fetch(apiUrl('/api/chat'), { method: 'GET', signal })
