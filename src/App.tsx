@@ -32,7 +32,17 @@ import {
   type DirectoryHandle,
   type ImportedFolder,
 } from './lib/desktop'
-import { GIT_CHANGED_EVENT, readGitState } from './lib/git'
+import { GIT_CHANGED_EVENT, isGitUsable, notifyGitChanged, readGitState, runGit } from './lib/git'
+import {
+  commitTurnCommand,
+  parseCommitHead,
+  parseRewindRange,
+  parseRewindResult,
+  rewindRangeCommand,
+  rewindTargetCommit,
+  rewindToCommitCommand,
+  turnCommitSubject,
+} from './lib/timeline'
 import { InstructionsPanel } from './components/InstructionsPanel'
 import { planRewind } from './lib/rewind'
 import { INSTRUCTIONS_FILE, instructionsContext, instructionsSummary, readInstructions } from './lib/instructions'
@@ -150,18 +160,33 @@ export default function App() {
   const folderRef = useRef<string | null>(null)
   const folderHandleRef = useRef<DirectoryHandle | null>(null)
 
+  /**
+   * Every write to the bound folder, chained.
+   *
+   * A turn writes files as their blocks close, so several writes overlap and
+   * the last one is not the only one still in flight. A commit awaits this to
+   * see the turn's bytes on disk rather than the contents they replaced; if it
+   * ran early it would record the previous state for whichever file had not
+   * landed yet.
+   */
+  const writesRef = useRef<Promise<unknown>>(Promise.resolve())
+
   /** Best-effort sync of model writes into the bound folder. */
-  const mirrorWrites = useCallback(async (files: { path: string; content: string }[]) => {
-    if (files.length === 0) return
-    try {
-      if (isDesktop()) {
-        if (folderRef.current) await writeProjectFiles(folderRef.current, files)
-      } else if (folderHandleRef.current) {
-        await writeViaDirectoryHandle(folderHandleRef.current, files)
+  const mirrorWrites = useCallback((files: { path: string; content: string }[]) => {
+    const task = writesRef.current.then(async () => {
+      if (files.length === 0) return
+      try {
+        if (isDesktop()) {
+          if (folderRef.current) await writeProjectFiles(folderRef.current, files)
+        } else if (folderHandleRef.current) {
+          await writeViaDirectoryHandle(folderHandleRef.current, files)
+        }
+      } catch (error) {
+        console.warn('Не удалось записать файлы в папку проекта:', error)
       }
-    } catch (error) {
-      console.warn('Не удалось записать файлы в папку проекта:', error)
-    }
+    })
+    writesRef.current = task
+    return task
   }, [])
 
   const mirrorDelete = useCallback(async (path: string) => {
@@ -546,6 +571,35 @@ export default function App() {
     return { writes, failures }
   }, [])
 
+  /**
+   * Records one turn as one commit and remembers its hash on the message.
+   *
+   * Silent by design. A project with no repository, a branch with nothing to
+   * record, a folder the user is still typing in — none of these are failures
+   * of the turn itself, and none of them should interrupt it. The Git panel is
+   * where a missing repository is already explained.
+   *
+   * Only the paths this turn wrote are committed, so work the user has in
+   * flight elsewhere in the same repository stays theirs.
+   */
+  const commitTurn = useCallback(
+    async (messageId: string, paths: string[], subject: string) => {
+      const folder = folderRef.current
+      if (!isDesktop() || !folder || !isGitUsable(folder)) return
+      const command = commitTurnCommand(subject, paths)
+      if (!command) return
+      // The commit has to see the turn's bytes, not the ones already there.
+      await writesRef.current
+      const result = await runGit(command, [], undefined, folder)
+      if (!result.ok) return
+      const { after } = parseCommitHead(result.output)
+      if (!after) return
+      dispatch({ type: 'message/commit', id: messageId, commit: after })
+      notifyGitChanged()
+    },
+    [],
+  )
+
   const send = useCallback(
     async (text: string, attachments: AttachmentMeta[], modeOverride?: AgentMode) => {
       if (busyRef.current) return
@@ -587,6 +641,15 @@ export default function App() {
         createdAt: Date.now(),
       }
       const assistantId = uid('msg')
+      /**
+       * Which turn this is, for the commit subject.
+       *
+       * Counted here, before the dispatch: the transcript ref catches up on the
+       * next render, and by the end of the turn it would already include this
+       * message.
+       */
+      const turnNumber =
+        stateRef.current.messages.filter((message) => message.role === 'assistant').length + 1
 
       dispatch({ type: 'user/send', message: userMessage })
       dispatch({ type: 'assistant/start', id: assistantId })
@@ -714,12 +777,16 @@ export default function App() {
         snapshots: [...beforeImages].map(([path, before]) => ({ path, before })),
       })
 
+      // The turn is on disk; record it as a commit so the transcript has a
+      // history and «Вернуться сюда» has a point to go back to.
+      void commitTurn(assistantId, [...beforeImages.keys()], turnCommitSubject(trimmed, result.prose, turnNumber))
+
       busyRef.current = false
       abortRef.current = null
       setBusy(false)
       setBudget(null)
     },
-    [activeProvider, applyFiles, inspector, resolveEdits],
+    [activeProvider, applyFiles, commitTurn, inspector, resolveEdits],
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
@@ -781,30 +848,61 @@ export default function App() {
     setApproval((current) => (current ? { ...current, status: 'rejected' } : current))
   }, [])
 
-  /** Reverts the newest turn's writes to their pre-turn content. */
-  const undoLastTurn = useCallback((message: ChatMessage) => {
-    if (busyRef.current) return
-    for (const snapshot of message.snapshots ?? []) {
-      if (snapshot.before === null) {
-        dispatch({ type: 'project/delete', path: snapshot.path })
-        void mirrorDelete(snapshot.path)
-      } else {
-        dispatch({ type: 'project/write', path: snapshot.path, content: snapshot.before })
-        void mirrorWrites([{ path: snapshot.path, content: snapshot.before }])
-      }
-    }
-    dispatch({ type: 'message/undo', id: message.id })
-  }, [mirrorDelete, mirrorWrites])
+  /**
+   * Re-reads the bound folder after git rewrote it.
+   *
+   * Unlike `refreshFromFolder` this replaces the project even when the folder
+   * came back empty: a rewind that removes the last file has to empty the app
+   * too, and an unchanged tree here would be the rewind half-happened.
+   */
+  const reloadFromFolder = useCallback(async () => {
+    const folder = folderRef.current
+    if (!isDesktop() || !folder) return
+    const source = await readProjectFolder(folder).catch(() => null)
+    if (!source) return
+    const project = projectFromWorkspaceFiles(source.files)
+    projectRef.current = project
+    setWorkspace((current) => ({
+      ...current,
+      project,
+      metadata: { ...current.metadata, updatedAt: Date.now() },
+    }))
+    dispatch({ type: 'project/set', project })
+  }, [])
 
   /**
-   * Puts the project's files back the way they were before a turn, and marks
-   * every turn it undoes. The transcript stays: the user still has the record
-   * of what was tried, and the model can be told to do it differently.
+   * Puts the project back the way it was before a turn, and marks every turn it
+   * undoes. The transcript stays: the user still has the record of what was
+   * tried, and the model can be told to do it differently.
+   *
+   * In a repository this is a checkout — the branch moves to the commit that
+   * turn made and the files follow. Three things can refuse it, and each falls
+   * back to the snapshot plan rather than failing: a target git does not know,
+   * uncommitted work in the tree (`reset --keep` will not discard it), and a
+   * commit the user made themselves between the target and now, which is not
+   * ours to drop. The files always end up where the user asked.
    */
   const rewindTo = useCallback(
-    (index: number) => {
+    async (index: number) => {
       if (busyRef.current) return
-      const plan = planRewind(stateRef.current.messages, index)
+      const messages = stateRef.current.messages
+      const plan = planRewind(messages, index)
+      const folder = isDesktop() ? folderRef.current : null
+      const target = folder ? rewindTargetCommit(messages, index) : null
+
+      if (folder && target) {
+        const range = await runGit(rewindRangeCommand(target), [], undefined, folder)
+        if (range.ok && parseRewindRange(range.output).foreign.length === 0) {
+          const reset = await runGit(rewindToCommitCommand(target), [], undefined, folder)
+          if (reset.ok && parseRewindResult(reset.output).moved) {
+            await reloadFromFolder()
+            for (const id of plan.turnIds) dispatch({ type: 'message/undo', id })
+            notifyGitChanged()
+            return
+          }
+        }
+      }
+
       for (const snapshot of plan.restore) {
         dispatch({ type: 'project/write', path: snapshot.path, content: snapshot.before })
         void mirrorWrites([{ path: snapshot.path, content: snapshot.before }])
@@ -815,7 +913,20 @@ export default function App() {
       }
       for (const id of plan.turnIds) dispatch({ type: 'message/undo', id })
     },
-    [mirrorDelete, mirrorWrites],
+    [mirrorDelete, mirrorWrites, reloadFromFolder],
+  )
+
+  /**
+   * The newest turn's «Отменить»: the same move as a rewind to that turn, so it
+   * takes the same route through git.
+   */
+  const undoLastTurn = useCallback(
+    (message: ChatMessage) => {
+      const index = stateRef.current.messages.indexOf(message)
+      if (index < 0) return
+      void rewindTo(index)
+    },
+    [rewindTo],
   )
 
   const setMode = useCallback((mode: AgentMode) => {
