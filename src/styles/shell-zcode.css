@@ -280,6 +280,47 @@
   gap: 6px;
 }
 
+/*
+ * A window too narrow for two work panes used to lose one of them for good:
+ * the stylesheet hid the inspector, and a file, the preview and the checks were
+ * simply unreachable. The rail keeps the switch that says which pane the
+ * window is showing; it only appears when a pane is actually being hidden.
+ */
+.shell-pane-switch {
+  display: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.shell-pane {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: none;
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  text-align: center;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.shell-pane:hover {
+  color: var(--fg-muted);
+}
+
+.shell-pane--active {
+  background: var(--bg);
+  color: var(--fg);
+}
+
 .rail-theme,
 .rail-settings {
   appearance: none;
@@ -1521,19 +1562,44 @@
 @media (max-width: 980px) {
   .app--zcode {
     --rail-width-default: 190px;
+    /*
+     * A desktop window that gets narrow is still a desktop window. The rule
+     * that stacked the shell into a column was written for a sidebar this
+     * shell no longer has, and it left the rail 400px tall above a 150px chat.
+     * The rail stays beside the work pane, and the switch below picks which.
+     */
+    flex-direction: row;
   }
 
-  /* The inspector is gone, so the chat gets everything that is left. */
+  /* The rail stays: it is the only way to reach another task, and now the
+     switch that says which pane the window is showing. */
+  .shell-pane-switch {
+    display: flex;
+  }
+
   .zcode-chat {
     min-width: 0;
   }
 
-  /* The inspector is gone, so its handle has nothing to drag. */
+  /* The inspector is the pane being hidden, so its handle has nothing to drag. */
   .column-resizer--end {
     display: none;
   }
 
-  .inspector-panel {
+  .app--zcode[data-pane='chat'] .inspector-panel {
     display: none;
+  }
+
+  /* The inspector is the only pane left, so it takes the room the chat gave up
+     rather than sitting at its wide-window width. */
+  .app--zcode[data-pane='inspector'] .zcode-chat {
+    display: none;
+  }
+
+  .app--zcode[data-pane='inspector'] .inspector-panel {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    max-width: none;
   }
 }

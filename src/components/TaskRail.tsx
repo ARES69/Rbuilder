@@ -5,6 +5,9 @@ import type { Workspace } from '../lib/workspace'
 /** What the rail reports about the terminal workspace, straight from git. */
 type GitSummary = { isRepo: boolean; branch: string | null; changes: number; lastCommit: string | null }
 
+/** Which work pane a narrow window is showing: one at a time, the switch picks. */
+export type ShellPane = 'chat' | 'inspector'
+
 type Props = {
   workspaces: Workspace[]
   activeId: string
@@ -24,6 +27,12 @@ type Props = {
   onExportProject: () => void
   /** Picks a .rbuilder.json and opens it as a new task. */
   onImportArchive: () => void
+  /**
+   * The pane a narrow window is showing. Left out on wide windows, where the
+   * stylesheet shows both and the switch stays hidden.
+   */
+  pane?: ShellPane
+  onPaneChange?: (pane: ShellPane) => void
 }
 
 /** One task row: active dot, clipped title, age on the right. */
@@ -64,6 +73,8 @@ export function TaskRail({
   onOpenProjects,
   onExportProject,
   onImportArchive,
+  pane = 'chat',
+  onPaneChange,
 }: Props) {
   const hasFindings = Boolean(checks?.findings.length)
   const statusLine = git?.isRepo
@@ -146,6 +157,26 @@ export function TaskRail({
           is the only thing it had that those two did not: where the project
           stands right now.
         */}
+        {onPaneChange ? (
+          <div className="shell-pane-switch" role="group" aria-label="Что показать в узком окне">
+            <button
+              type="button"
+              className={`shell-pane${pane === 'chat' ? ' shell-pane--active' : ''}`}
+              onClick={() => onPaneChange('chat')}
+              aria-pressed={pane === 'chat'}
+            >
+              Чат
+            </button>
+            <button
+              type="button"
+              className={`shell-pane${pane === 'inspector' ? ' shell-pane--active' : ''}`}
+              onClick={() => onPaneChange('inspector')}
+              aria-pressed={pane === 'inspector'}
+            >
+              Инспектор
+            </button>
+          </div>
+        ) : null}
         <p className={`rail-status${hasFindings ? ' rail-status--warn' : ''}`} title={statusTitle}>
           <span className="rail-status-dot" aria-hidden="true" />
           <span className="rail-status-text">{statusLine}</span>
