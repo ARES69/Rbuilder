@@ -62,6 +62,7 @@ export const TOOL_LABELS: Record<string, string> = {
   inspect_preview: 'Inspected the preview',
   interact_with_preview: 'Used the preview',
   read_project_file: 'Read a project file',
+  search_project: 'Searched the project',
   run_checks: 'Ran the project checks',
   run_command: 'Ran a command',
 }
@@ -119,6 +120,31 @@ export const TOOL_DEFINITIONS = [
         type: 'object',
         properties: { path: { type: 'string', description: 'Project-relative path.' } },
         required: ['path'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'search_project',
+      description:
+        'Find text in the project files and get back the matching lines with their file and line number, like grep. Use it to locate where something is defined or used before reading a whole file — that is what this is for, and it is much cheaper than reading files one by one. The pattern is literal text unless regex is true; the search ignores case unless caseSensitive is true.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: {
+            type: 'string',
+            description: 'The text to look for. Treated literally unless regex is true.',
+          },
+          path: {
+            type: 'string',
+            description: 'Only search files whose path contains this text, e.g. "app" or "src/".',
+          },
+          regex: { type: 'boolean', description: 'Treat the pattern as a regular expression (default false).' },
+          caseSensitive: { type: 'boolean', description: 'Match case exactly (default false).' },
+        },
+        required: ['pattern'],
         additionalProperties: false,
       },
     },
@@ -232,6 +258,7 @@ const TOOLS = `You can inspect your own work with tools. Available functions:
 - inspect_preview(): read the running preview — outline, console output, runtime errors, failed requests. Call it after writing files, and never claim the app works without it when a check is cheap.
 - interact_with_preview(action, target, text, key): click, type or press a key in the preview to verify an interaction end to end.
 - read_project_file(path): read a file's full current contents.
+- search_project(pattern, path?, regex?, caseSensitive?): find text across the project and get back matching lines with file and line numbers, like grep. Reach for this first whenever you need to know where something is defined or used — reading files one by one to find one line is the expensive way. The pattern is literal unless you ask for a regular expression.
 - run_checks(): run the project checks (syntax, structure, missing files).
 - run_command(command): run one shell command in the project folder (node --check app.js, ls, git status) and see its real output. In ask mode the user approves every command first, so prefer the built-in tools when they can answer and batch command needs into few calls.
 

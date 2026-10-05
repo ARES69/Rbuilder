@@ -12,6 +12,7 @@ import { formatChecks, runChecks } from './checks'
 import { channelFor, type InteractResult, type PreviewInspector, type PreviewSnapshot } from './inspector'
 import type { ToolCall } from './protocol'
 import { TOOL_LABELS } from './protocol'
+import { formatSearch, searchProject } from './search'
 import type { Project } from './project'
 
 export type ToolOutcome = {
@@ -45,6 +46,8 @@ export async function executeTool(call: ToolCall, context: ToolContext): Promise
         return await interactWithPreview(context, args)
       case 'read_project_file':
         return readProjectFile(context, String(args.path ?? ''))
+      case 'search_project':
+        return searchProjectFiles(context, args)
       case 'run_checks':
         return runProjectChecks(context)
       case 'run_command':
@@ -156,6 +159,28 @@ function readProjectFile(context: ToolContext, path: string): ToolOutcome {
     summary: `Read ${file.path}`,
     text: `Contents of ${file.path}:\n\n${content}`,
   }
+}
+
+function searchProjectFiles(context: ToolContext, args: Record<string, unknown>): ToolOutcome {
+  const pattern = String(args.pattern ?? '')
+  const result = searchProject(context.project.files, {
+    pattern,
+    regex: args.regex === true,
+    caseSensitive: args.caseSensitive === true,
+    path: args.path === undefined ? undefined : String(args.path),
+  })
+  const text = formatSearch(result, pattern)
+
+  if (!result.ok) {
+    return { ok: false, summary: 'Search — nothing to search for', text }
+  }
+
+  const summary =
+    result.total === 0
+      ? `Search — no matches for "${pattern}"`
+      : `Search — ${result.total} match${result.total === 1 ? '' : 'es'} in ${result.files} file${result.files === 1 ? '' : 's'}`
+
+  return { ok: true, summary, text }
 }
 
 function runProjectChecks(context: ToolContext): ToolOutcome {
@@ -334,6 +359,10 @@ export function describeCall(call: ToolCall): string {
       return `${String(args.action ?? 'act')}${args.target ? ` "${String(args.target)}"` : ''}`
     case 'read_project_file':
       return String(args.path ?? 'file')
+    case 'search_project': {
+      const pattern = String(args.pattern ?? 'text')
+      return args.path ? `"${pattern}" in ${String(args.path)}` : `"${pattern}"`
+    }
     case 'run_command':
       return String(args.command ?? 'command')
     default:
