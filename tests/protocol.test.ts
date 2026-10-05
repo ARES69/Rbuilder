@@ -371,4 +371,14 @@ describe('buildSystemPrompt', () => {
   it('plan mode refuses edit blocks as well as file blocks', () => {
     expect(buildSystemPrompt('plan')).toContain('Do not emit any file or edit blocks')
   })
+
+  it('every mode teaches the project instructions convention', () => {
+    for (const mode of ['build', 'ask', 'plan'] as const) {
+      const prompt = buildSystemPrompt(mode)
+
+      expect(prompt, mode).toContain('RBUILDER.md')
+      expect(prompt, mode).toContain('```project-instructions')
+      expect(prompt, mode).toContain('Never rewrite RBUILDER.md')
+    }
+  })
 })

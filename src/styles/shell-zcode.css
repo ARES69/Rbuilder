@@ -415,6 +415,29 @@
   font-size: 11px;
 }
 
+/* A chip the user can press, e.g. «Инструкции» in the chat header. */
+.zcode-chip--button {
+  appearance: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.zcode-chip--button:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+/* Instructions exist: the chip is marked before anyone opens it. */
+.zcode-chip--set {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.zcode-chip--set span:first-child {
+  color: var(--accent);
+}
+
 /* «Открыть в проводнике» next to the folder chip. */
 .zcode-chip-button {
   appearance: none;

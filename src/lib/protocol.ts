@@ -22,6 +22,7 @@
 
 import { z } from 'zod'
 import { parseEditBody, type EditBlock } from './edits'
+import { INSTRUCTIONS_FILE } from './instructions'
 import { normalizePath, type ProjectFileInput } from './project'
 
 /* ------------------------------------------------------------------ */
@@ -222,7 +223,9 @@ The user can attach any file to a message. Text-like attachments arrive inline a
 <file content, possibly truncated>
 \`\`\`
 
-Binary attachments arrive as a single line with the name, media type and size. Use attachments as context and say so when you relied on one.`
+Binary attachments arrive as a single line with the name, media type and size. Use attachments as context and say so when you relied on one.
+
+The project may keep standing instructions in ${INSTRUCTIONS_FILE}. When it has one, the content arrives before every user message inside a \`\`\`project-instructions block: the stack, the structure, naming, styling, what not to do. Treat it as the project's standing brief and let the current message override it. Never rewrite ${INSTRUCTIONS_FILE} unless the user asks you to change the instructions — it belongs to the user, not to you.`
 
 const TOOLS = `You can inspect your own work with tools. Available functions:
 

@@ -25,6 +25,8 @@ import {
   type ImportedFolder,
 } from './lib/desktop'
 import { GIT_CHANGED_EVENT, readGitState } from './lib/git'
+import { InstructionsPanel } from './components/InstructionsPanel'
+import { INSTRUCTIONS_FILE, instructionsContext, instructionsSummary, readInstructions } from './lib/instructions'
 import {
   FOLDER_CHANGED_EVENT,
   notifyFolderSynced,
@@ -170,6 +172,9 @@ export default function App() {
   const [git, setGit] = useState<GitSummary | null>(null)
   const [browserSessionOpen, setBrowserSessionOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [instructionsOpen, setInstructionsOpen] = useState(false)
+  /** The project's standing rules, read off the project file every render. */
+  const instructions = readInstructions(state.project.files)
   /**
    * The shell's three columns. The chat always takes what is left; the rail and
    * the inspector are dragged to a width and remembered, because re-arranging
@@ -545,8 +550,15 @@ export default function App() {
           .join('\n\n'),
       }
 
-      // The model is stateless, so it is told what the project looks like now.
-      userTurn.content = `${userTurn.content}\n\n---\n${projectContext(projectRef.current)}`
+      // The model is stateless, so it is told the project's standing rules and
+      // what the project looks like now, on every single message.
+      const brief = [
+        instructionsContext(readInstructions(projectRef.current.files)),
+        projectContext(projectRef.current),
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+      if (brief) userTurn.content = `${userTurn.content}\n\n---\n${brief}`
 
       const userMessage: ChatMessage = {
         id: uid('msg'),
@@ -694,6 +706,21 @@ export default function App() {
   const stop = useCallback(() => abortRef.current?.abort(), [])
 
   /** Opens a changed file in the code column; changed files land on their diff. */
+  /** Writes the project's standing rules; an empty text removes the file. */
+  const saveInstructions = useCallback(
+    (text: string) => {
+      if (text.trim()) {
+        dispatch({ type: 'project/write', path: INSTRUCTIONS_FILE, content: text })
+        void mirrorWrites([{ path: INSTRUCTIONS_FILE, content: text }])
+      } else {
+        dispatch({ type: 'project/delete', path: INSTRUCTIONS_FILE })
+        void mirrorDelete(INSTRUCTIONS_FILE)
+      }
+      setInstructionsOpen(false)
+    },
+    [mirrorDelete, mirrorWrites],
+  )
+
   const openFile = useCallback((path: string) => {
     setFocusFile(path)
     setInspectorTab('code')
@@ -1261,6 +1288,21 @@ const reset = useCallback(async () => {
               {git.branch}
             </span>
           ) : null}
+          {/*
+            The chip says the project has rules before it is opened: a filled
+            dot next to the name is the difference between «I set them once»
+            and «did I set them?».
+          */}
+          <button
+            type="button"
+            className={`zcode-chip zcode-chip--button${instructions ? ' zcode-chip--set' : ''}`}
+            onClick={() => setInstructionsOpen(true)}
+            title={instructions ? `Инструкции проекта: ${instructionsSummary(instructions)}` : 'Задать инструкции проекта'}
+            aria-label="Инструкции проекта"
+          >
+            <span aria-hidden="true">✎</span>
+            Инструкции
+          </button>
           <div className="zcode-chat-head-end">
             {state.configured && state.model ? <span className="topbar-model">{state.model}</span> : null}
           </div>
@@ -1364,6 +1406,13 @@ const reset = useCallback(async () => {
           void importProject(file)
         }}
       />
+      {instructionsOpen ? (
+        <InstructionsPanel
+          value={instructions}
+          onSave={saveInstructions}
+          onClose={() => setInstructionsOpen(false)}
+        />
+      ) : null}
       {settingsOpen ? (
         <SettingsPanel
           profiles={providerList}
