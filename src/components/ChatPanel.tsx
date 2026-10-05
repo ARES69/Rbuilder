@@ -46,10 +46,17 @@ type Props = {
   onModelChange: (model: string) => void
 }
 
+/**
+ * What a first prompt usually is.
+ *
+ * These are applications, not exercises: each one needs pages, state, data
+ * handling and a few decisions the model has to make on its own. A starter
+ * that says "сделай таймер" teaches the builder what a timer is.
+ */
 export const EXAMPLES = [
-  'Ценовая страница для дизайн-студии',
-  'Помодоро-таймер с горячими клавишами',
-  'Дашборд с графиками из прикреплённого CSV',
+  'Интернет-магазин с каталогом, фильтрами и корзиной',
+  'Личный кабинет: профиль, настройки и тёмная тема',
+  'Дашборд аналитики по приложенному CSV с графиками',
 ]
 
 export function ChatPanel({
