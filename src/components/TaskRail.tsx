@@ -1,5 +1,5 @@
 import type { ChecksResult } from '../lib/checks'
-import { relativeTime } from '../lib/time'
+import { relativeTimeRu } from '../lib/time'
 import type { Workspace } from '../lib/workspace'
 
 /** What the rail reports about the terminal workspace, straight from git. */
@@ -65,22 +65,34 @@ export function TaskRail({
   onExportProject,
   onImportArchive,
 }: Props) {
-  const checkLine = checks ? summarizeChecks(checks) : 'проверки не запускались'
+  const hasFindings = Boolean(checks?.findings.length)
+  const statusLine = git?.isRepo
+    ? `${git.branch ?? 'main'} · ${git.changes} измен.`
+    : checks
+      ? summarizeChecks(checks)
+      : 'Проверки не запускались'
+  const statusTitle = git?.isRepo
+    ? `Ветка ${git.branch ?? 'main'}, изменений: ${git.changes}`
+    : 'Задача пока не под git — проверки проекта'
 
   return (
     <aside className="task-rail" aria-label="Задачи">
       <div className="rail-top">
         <button type="button" className="rail-new" onClick={onNewTask} disabled={busy}>
-          <span aria-hidden="true">✚</span> New Task
+          <span className="rail-glyph" aria-hidden="true">✚</span>
+          <span className="rail-label">Новая задача</span>
         </button>
-        <button type="button" className="rail-action" onClick={onOpenWorkspace}>
-          <span aria-hidden="true">▤</span> Open Workspace
+        <button type="button" className="rail-action" onClick={onOpenWorkspace} title="К открытому проекту">
+          <span className="rail-glyph" aria-hidden="true">▤</span>
+          <span className="rail-label">Открыть проект</span>
         </button>
         <button type="button" className="rail-action" onClick={onOpenProjects}>
-          <span aria-hidden="true">◈</span> Projects
+          <span className="rail-glyph" aria-hidden="true">◈</span>
+          <span className="rail-label">Проекты</span>
         </button>
         <button type="button" className="rail-action" onClick={onImportFolder} disabled={importing}>
-          <span aria-hidden="true">◇</span> {importing ? 'Импорт…' : 'Open Folder'}
+          <span className="rail-glyph" aria-hidden="true">◇</span>
+          <span className="rail-label">{importing ? 'Открываю…' : 'Открыть папку'}</span>
         </button>
         <div className="rail-pair">
           <button
@@ -90,7 +102,8 @@ export function TaskRail({
             disabled={busy}
             title="Сохранить проект в файл .rbuilder.json"
           >
-            <span aria-hidden="true">⤓</span> Export
+            <span className="rail-glyph" aria-hidden="true">⤓</span>
+            <span className="rail-label">Экспорт</span>
           </button>
           <button
             type="button"
@@ -99,13 +112,14 @@ export function TaskRail({
             disabled={busy || importing}
             title="Открыть проект из файла .rbuilder.json"
           >
-            <span aria-hidden="true">⤒</span> Import
+            <span className="rail-glyph" aria-hidden="true">⤒</span>
+            <span className="rail-label">Импорт</span>
           </button>
         </div>
       </div>
 
       <div className="rail-group">
-        <span className="rail-group-label">Tasks</span>
+        <span className="rail-group-label">Задачи</span>
       </div>
 
       <div className="rail-list">
@@ -116,7 +130,7 @@ export function TaskRail({
             <RailItem
               key={entry.metadata.id}
               name={entry.metadata.name}
-              age={relativeTime(entry.metadata.updatedAt)}
+              age={relativeTimeRu(entry.metadata.updatedAt)}
               active={entry.metadata.id === activeId}
               onClick={() => onSelect(entry.metadata.id)}
             />
@@ -125,18 +139,17 @@ export function TaskRail({
       </div>
 
       <div className="rail-footer">
-        <div
-          className="rail-project"
-          title={workspaces.find((entry) => entry.metadata.id === activeId)?.metadata.localPath ?? undefined}
-          onClick={onOpenWorkspace}
-          role="presentation"
-        >
-          <span className="rail-avatar" aria-hidden="true">R</span>
-          <span className="rail-project-main">
-            <strong>{workspaces.find((entry) => entry.metadata.id === activeId)?.metadata.name ?? 'Untitled'}</strong>
-            <small>{git?.isRepo ? git.branch : checkLine}</small>
-          </span>
-        </div>
+        {/*
+          The task name used to be printed here for the third time — in the list
+          above it, and again in the chat header — and the whole block was a div
+          with a click handler, which the keyboard could not reach. What is left
+          is the only thing it had that those two did not: where the project
+          stands right now.
+        */}
+        <p className={`rail-status${hasFindings ? ' rail-status--warn' : ''}`} title={statusTitle}>
+          <span className="rail-status-dot" aria-hidden="true" />
+          <span className="rail-status-text">{statusLine}</span>
+        </p>
         <div className="rail-footer-actions">
           <button type="button" className="rail-theme" onClick={onToggleTheme} title="Переключить тему" aria-label="Переключить тему">
             {theme === 'dark' ? '☾' : '☀'}

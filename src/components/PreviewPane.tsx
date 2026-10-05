@@ -111,7 +111,7 @@ export function PreviewPane(props: Props) {
               {problems} {problems === 1 ? 'ошибка' : 'ошибок'}
             </span>
           ) : null}
-          <ul className="chips chips--files" aria-label="Project files">
+          <ul className="chips chips--files" aria-label="Файлы проекта">
             {visibleFiles.map((path) => (
               <li key={path} className="chip chip--file">
                 {path}
@@ -162,7 +162,7 @@ export function PreviewPane(props: Props) {
             key={version}
             ref={attachFrame}
             className="preview-iframe"
-            title="App preview"
+            title="Предпросмотр приложения"
             srcDoc={document}
             sandbox="allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock"
           />

@@ -6,6 +6,7 @@ import {
   EMPTY_SPEND,
   formatCost,
   priceFor,
+  shortCost,
   splitTokens,
   type CostResult,
 } from '../src/lib/pricing'
@@ -91,6 +92,32 @@ describe('formatCost', () => {
   it('uses more precision as the amount grows', () => {
     expect(formatCost(0.0423)).toBe('$0.042')
     expect(formatCost(1.5)).toBe('$1.50')
+  })
+})
+
+describe('shortCost', () => {
+  it('is the number when there is one', () => {
+    expect(shortCost({ kind: 'priced', cost: 0.0423, price: { input: 1, output: 2 }, split: { input: 1, output: 1 } }))
+      .toBe('$0.042')
+  })
+
+  it('never reads as free when the price is missing', () => {
+    expect(shortCost({ kind: 'unpriced', split: { input: 10, output: 2 } })).toBe('цена ?')
+    expect(shortCost({ kind: 'unknown', split: { input: 0, output: 0 } })).toBe('нет данных')
+    expect(shortCost({ kind: 'unpriced', split: { input: 0, output: 0 } })).not.toContain('$0.00')
+  })
+
+  it('says the model is local, which is the one free case', () => {
+    expect(shortCost({ kind: 'free', reason: 'local', split: { input: 5, output: 5 } })).toBe('локально')
+  })
+
+  it('fits on the composer row: a short word, never a sentence', () => {
+    const words = [
+      shortCost({ kind: 'free', reason: 'local', split: { input: 5, output: 5 } }),
+      shortCost({ kind: 'unpriced', split: { input: 10, output: 2 } }),
+      shortCost({ kind: 'unknown', split: { input: 0, output: 0 } }),
+    ]
+    for (const word of words) expect(word.length).toBeLessThanOrEqual(10)
   })
 })
 

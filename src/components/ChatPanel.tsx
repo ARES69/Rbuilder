@@ -153,18 +153,11 @@ export function ChatPanel({
         void attach(event.dataTransfer.files)
       }}
     >
-      <header className="pane-header">
-        <h1 className="pane-title">Чат</h1>
-        <span className="pane-subtitle">
-          {busy
-            ? mode === 'plan'
-              ? 'Планирование…'
-              : 'Сборка…'
-            : messages.length > 0
-              ? `${messages.length} сообщений`
-              : 'Готово'}
-        </span>
-      </header>
+      {/*
+        There was a second header here that said «Чат» and, while a turn ran,
+        «Сборка…» — directly under the chat column header, which already carries
+        the task name, the mode and that same state. One row, one source.
+      */}
 
       <MessageList
         messages={messages}

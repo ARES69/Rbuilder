@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { AttachmentChips } from './AttachmentChips'
 import type { AttachmentMeta } from '../lib/attachments'
 import { budgetUsed, describeBudget, formatDuration, msLeft, type Budget } from '../lib/budget'
-import { describeCost, formatCost, type CostResult, type SessionSpend } from '../lib/pricing'
+import { describeCost, formatCost, shortCost, type CostResult, type SessionSpend } from '../lib/pricing'
 import type { AgentMode } from '../lib/protocol'
 
 type Props = {
@@ -72,7 +72,12 @@ export function Composer({
     element.style.height = `${Math.min(element.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`
   }, [draft])
 
-  const canSend = !busy && !reading && (draft.trim().length > 0 || attachments.length > 0)
+  // Without a model there is nothing to send to, and the turn would only come
+  // back with the same "no model configured" answer every time. The button has
+  // always been disabled for this — Enter was not, which is how four identical
+  // replies ended up in one transcript.
+  const canSend =
+    !busy && !reading && configured !== false && (draft.trim().length > 0 || attachments.length > 0)
 
   return (
     <div className="composer">
@@ -116,7 +121,7 @@ export function Composer({
                 type="button"
                 className={`segment${mode === 'ask' ? ' segment--active' : ''}`}
                 onClick={() => onModeChange('ask')}
-                title="Показывать правки на подтверждение перед записью">Спрашивать</button>
+                title="Показывать правки на подтверждение перед записью">Спросить</button>
               <button
                 type="button"
                 className={`segment${mode === 'plan' ? ' segment--active' : ''}`}
@@ -140,6 +145,13 @@ export function Composer({
                 event.target.value = ''
               }}
             />
+            {/*
+              While a turn runs the budget meter takes this spot; otherwise a
+              one-line hint does. Short on purpose: the mode is already named
+              on the switch above and explained in its tooltip, so this says
+              only what is nowhere else — and short enough to disappear instead
+              of turning into «Л…» when the column is narrow.
+            */}
             {busy && budget ? (
               <span
                 className={`budget${wrappingUp ? ' budget--wrapping' : ''}`}
@@ -162,10 +174,10 @@ export function Composer({
                 {reading
                   ? 'Читаю файлы…'
                   : mode === 'plan'
-                    ? 'Режим плана · код не изменяется до подтверждения'
+                    ? 'Код не меняется до подтверждения'
                     : mode === 'ask'
-                      ? 'Правки применяются только после вашего подтверждения'
-                      : 'Любой тип файла · перетащите его на панель'}
+                      ? 'Правки — после подтверждения'
+                      : 'Enter — отправить, Shift+Enter — новая строка'}
               </span>
             )}
           </div>
@@ -205,7 +217,7 @@ export function Composer({
                   className={`cost-chip cost-chip--${lastCost.kind}`}
                   title={`${describeCost(lastCost)}. Цены зафиксированы 2026-10-02 и могут измениться у провайдера.`}
                 >
-                  {lastCost.kind === 'priced' ? formatCost(lastCost.cost) : describeCost(lastCost)}
+                  {shortCost(lastCost)}
                   {spend.turns > 1 && spend.complete && lastCost.kind === 'priced'
                     ? ` · всего ${formatCost(spend.cost)}`
                     : ''}

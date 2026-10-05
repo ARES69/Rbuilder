@@ -14,7 +14,7 @@ export function AttachmentChips({ attachments, onRemove }: Props) {
   if (attachments.length === 0) return null
 
   return (
-    <ul className="chips" aria-label="Attached files">
+    <ul className="chips" aria-label="Прикреплённые файлы">
       {attachments.map((attachment) => (
         <li
           key={attachment.id}
