@@ -31,6 +31,9 @@ import type { TerminalLine } from '../lib/store'
 
 export type DockTab = 'files' | 'git' | 'console' | 'checks' | 'terminal'
 
+/** Whether the file list is open, remembered between launches. */
+const FILE_LIST_KEY = 'rbuilder:file-list-open'
+
 export type DockProps = {
   project: Project
   baselineProject: Project
@@ -119,6 +122,28 @@ export function Dock(props: DockProps) {
 function FilesPanel({ project, onWriteFile, onDeleteFile, onAskAgent }: DockProps) {
   const [selected, setSelected] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  /**
+   * Whether the file list is open.
+   *
+   * The dock sits under the preview, so every pixel the list takes is a pixel
+   * the page does not get. It is a preference about how you want to work, so it
+   * is remembered rather than reset on every tab switch.
+   */
+  const [listOpen, setListOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(FILE_LIST_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FILE_LIST_KEY, listOpen ? '1' : '0')
+    } catch {
+      /* a preference, not state the panel depends on */
+    }
+  }, [listOpen])
 
   const file: ProjectFile | undefined = useMemo(
     () => project.files.find((entry) => entry.path === selected) ?? project.files[0],
@@ -137,19 +162,33 @@ function FilesPanel({ project, onWriteFile, onDeleteFile, onAskAgent }: DockProp
 
   return (
     <div className="files">
-      <ul className="file-list">
-        {project.files.map((entry) => (
-          <li key={entry.path}>
-            <button
-              type="button"
-              className={`file-item${entry.path === file?.path ? ' file-item--active' : ''}`}
-              onClick={() => setSelected(entry.path)}
-            >
-              {entry.path}
-            </button>
-          </li>
-        ))}
-      </ul>
+      {/* The checkbox stays visible when the list is closed, so the rail is
+          never a dead strip with no way back. */}
+      <div className={`file-list-wrap${listOpen ? '' : ' is-collapsed'}`}>
+        <label className="file-list-toggle" title="Показать или скрыть список файлов">
+          <input
+            type="checkbox"
+            checked={listOpen}
+            onChange={(event) => setListOpen(event.target.checked)}
+          />
+          <span className="file-list-toggle-label">Файлы</span>
+        </label>
+        {listOpen ? (
+          <ul className="file-list">
+            {project.files.map((entry) => (
+              <li key={entry.path}>
+                <button
+                  type="button"
+                  className={`file-item${entry.path === file?.path ? ' file-item--active' : ''}`}
+                  onClick={() => setSelected(entry.path)}
+                >
+                  {entry.path}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
 
       <div className="file-editor">
         <div className="file-editor-head">
