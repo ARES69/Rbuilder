@@ -76,6 +76,14 @@ export function ProjectsView({
   importing,
 }: Props) {
   const [renaming, setRenaming] = useState<string | null>(null)
+  /**
+   * Which row is waiting for a second click.
+   *
+   * Deleting a task takes its project with it, and a task whose files never
+   * left the app leaves nothing behind — so the button asks first, in the row
+   * itself, where the thing being deleted can still be read.
+   */
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   /** Commits the edited name, or leaves it alone when the edit was cancelled. */
   const finishRename = (id: string, name: string | null) => {
@@ -122,7 +130,13 @@ export function ProjectsView({
             {workspaces.map((entry) => {
               const isActive = entry.metadata.id === activeId
               return (
-              <li key={entry.metadata.id} className={`project-row${isActive ? ' project-row--active' : ''}`}>
+              <li
+                key={entry.metadata.id}
+                className={`project-row${isActive ? ' project-row--active' : ''}`}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && deleting === entry.metadata.id) setDeleting(null)
+                }}
+              >
                 <span className="workspace-card-icon" aria-hidden="true">⌘</span>
                 <div className="project-row-main">
                   {renaming === entry.metadata.id ? (
@@ -150,19 +164,38 @@ export function ProjectsView({
                   <button
                     type="button"
                     className="button button--quiet"
-                    disabled={renaming === entry.metadata.id}
+                    disabled={renaming === entry.metadata.id || deleting === entry.metadata.id}
                     onClick={() => setRenaming(entry.metadata.id)}
                   >
                     Переименовать
                   </button>
-                  <button
-                    type="button"
-                    className="button button--quiet"
-                    disabled={workspaces.length <= 1}
-                    onClick={() => onDelete(entry.metadata.id)}
-                  >
-                    Удалить
-                  </button>
+                  {deleting === entry.metadata.id ? (
+                    <span className="confirm-pair">
+                      <span className="confirm-question">Удалить проект?</span>
+                      <button
+                        type="button"
+                        className="button button--danger"
+                        onClick={() => {
+                          setDeleting(null)
+                          onDelete(entry.metadata.id)
+                        }}
+                      >
+                        Да
+                      </button>
+                      <button type="button" className="button button--quiet" onClick={() => setDeleting(null)}>
+                        Нет
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button button--quiet"
+                      disabled={workspaces.length <= 1}
+                      onClick={() => setDeleting(entry.metadata.id)}
+                    >
+                      Удалить
+                    </button>
+                  )}
                 </div>
               </li>
               )

@@ -136,6 +136,14 @@ function FilesPanel({ project, onWriteFile, onDeleteFile, onAskAgent }: DockProp
       return true
     }
   })
+  /**
+   * Whether the delete button is asking instead of acting.
+   *
+   * Removing a file writes through to the project folder, and a file the agent
+   * spent a turn writing is not something a single click should take away. The
+   * question sits where the file is, so what is at stake can still be read.
+   */
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
     try {
@@ -153,6 +161,11 @@ function FilesPanel({ project, onWriteFile, onDeleteFile, onAskAgent }: DockProp
   useEffect(() => {
     setDraft(file?.content ?? '')
   }, [file?.path, file?.content])
+
+  // A question about the old file is not a question about the new one.
+  useEffect(() => {
+    setConfirmDelete(false)
+  }, [file?.path])
 
   if (project.files.length === 0) {
     return <p className="dock-note">Файлов пока нет. Попросите RBUILDER создать приложение — они появятся здесь.</p>
@@ -205,15 +218,32 @@ function FilesPanel({ project, onWriteFile, onDeleteFile, onAskAgent }: DockProp
               className="button button--quiet"
               disabled={!file || !dirty}
               onClick={() => file && onWriteFile(file.path, draft)}>Сохранить</button>
-            <button
-              type="button"
-              className="button button--quiet"
-              disabled={!file || project.files.length <= 1}
-              onClick={() => {
-                if (!file) return
-                onDeleteFile(file.path)
-                setSelected(null)
-              }}>Удалить</button>
+            {confirmDelete && file ? (
+              <span className="confirm-pair" onKeyDown={(event) => event.key === 'Escape' && setConfirmDelete(false)}>
+                <span className="confirm-question">Удалить {file.path}?</span>
+                <button
+                  type="button"
+                  className="button button--danger"
+                  onClick={() => {
+                    onDeleteFile(file.path)
+                    setConfirmDelete(false)
+                    setSelected(null)
+                  }}
+                >
+                  Да
+                </button>
+                <button type="button" className="button button--quiet" onClick={() => setConfirmDelete(false)}>
+                  Нет
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="button button--quiet"
+                disabled={!file || project.files.length <= 1}
+                onClick={() => setConfirmDelete(true)}
+              >Удалить</button>
+            )}
             <button
               type="button"
               className="button button--quiet"
