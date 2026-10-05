@@ -8,7 +8,15 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { BrowserSessionPanel } from './components/BrowserSessionPanel'
 import { TaskRail, type ShellPane } from './components/TaskRail'
 import type { DockTab } from './components/PreviewPane'
-import { DEFAULT_PROVIDER_PROFILES, execCommand, fetchAgentConfig, testProvider, type ProviderProfile } from './lib/agent'
+import {
+  DEFAULT_PROVIDER_PROFILES,
+  execCommand,
+  fetchAgentConfig,
+  resolveModelConfig,
+  testProvider,
+  type AgentConfig,
+  type ProviderProfile,
+} from './lib/agent'
 import { apiBase, isDesktop } from './lib/apiBase'
 import {
   deleteProjectFile,
@@ -436,22 +444,32 @@ export default function App() {
     }
   }, [inspector, channel])
 
+  /*
+   * One flag, one writer.
+   *
+   * The server's configuration arrives a beat after mount, and it used to be
+   * dispatched straight into the same state the profile effect had already
+   * settled: whichever landed last won, and the composer kept its «Модель не
+   * настроена» notice over a perfectly good provider until the user touched
+   * the dropdown. The server is now kept as the fallback it actually is, and
+   * `resolveModelConfig` decides.
+   */
+  const [serverConfig, setServerConfig] = useState<AgentConfig | null>(null)
+
   useEffect(() => {
     const controller = new AbortController()
     void fetchAgentConfig(controller.signal).then((config) => {
-      dispatch({ type: 'app/meta', configured: config.configured, model: config.model })
+      if (!controller.signal.aborted) setServerConfig(config)
     })
     return () => controller.abort()
   }, [])
 
-  // The active profile is what actually travels with every request, so its
-  // completeness — not the server's default env config — is what "configured"
-  // means in the UI. Without this the label kept saying "not configured" after
-  // a local provider was set up, and the composer kept its warning up.
+  // Primitives, not the object: this resolves to a fresh one on every render,
+  // and depending on the object would dispatch forever.
+  const modelConfig = resolveModelConfig(activeProvider, serverConfig)
   useEffect(() => {
-    const providerReady = Boolean(activeProvider.baseUrl.trim() && activeProvider.model.trim() && (activeProvider.apiKey.trim() || activeProvider.kind === 'ollama' || activeProvider.kind === 'lmstudio'))
-    dispatch({ type: 'app/meta', configured: providerReady, model: providerReady ? activeProvider.model : undefined })
-  }, [activeProvider])
+    dispatch({ type: 'app/meta', configured: modelConfig.configured, model: modelConfig.model })
+  }, [modelConfig.configured, modelConfig.model])
 
   // Local providers answer instantly: fetch their model list once so the
   // composer chip can offer real ids without opening Settings.
@@ -624,9 +642,9 @@ export default function App() {
           },
           onPlan: (items) => dispatch({ type: 'plan/set', items }),
           onBudget: (live, wrappingUp) => setBudget({ budget: live, wrappingUp }),
-          onMeta: (config) => {
-            dispatch({ type: 'app/meta', configured: config.configured, model: config.model })
-          },
+          // A step only reports a model when it reached one, so this can only
+          // ever turn the flag on.
+          onMeta: (config) => setServerConfig(config),
           onToolStart: (call) => {
             dispatch({
               type: 'tool/start',
@@ -1361,8 +1379,9 @@ const reset = useCallback(async () => {
           activeProviderId={activeProviderId}
           onProviderChange={setActiveProviderId}
           onModelChange={(model) => {
+            // No flag to set here: a complete profile is already configured, and
+            // claiming otherwise for an incomplete one only delayed the error.
             setProviders((current) => current.map((entry) => entry.id === activeProviderId ? { ...entry, model } : entry))
-            dispatch({ type: 'app/meta', configured: true, model })
           }}
         />
       </section>
