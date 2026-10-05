@@ -15,7 +15,10 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: 'node',
-      include: ['tests/**/*.test.ts'],
+      // Component tests live beside the rest and are written in JSX, so `.tsx`
+      // is collected too; the harness picks the DOM up per file through its own
+      // `@vitest-environment jsdom` header. Visual shots are a separate config.
+      include: ['tests/**/*.test.{ts,tsx}'],
     },
   }
 })

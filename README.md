@@ -322,10 +322,41 @@ the watch started — actually produces an event.
 | --- | --- |
 | `pnpm dev` | Dev server with the `/api/chat` and `/api/exec` middleware (the supported way to run it) |
 | `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm test` | Vitest: project, protocol, attachments, markdown, checks and the preview runtime |
+| `pnpm test` | Vitest: project, protocol, attachments, markdown, checks, the preview runtime and React components |
 | `pnpm test:visual` | Screenshot tests for the preview pane (needs `pnpm exec playwright install chromium`) |
 | `pnpm test:visual:update` | Re-record the screenshot baselines after an intended visual change |
 | `pnpm build` | Production build of the front end (no API middleware) |
+
+### Component tests
+
+`tests/components/` renders real components into jsdom and drives them the way a
+person does — press a button, read what the screen says. It is what keeps
+behaviour like «which turn offers a rewind» and «what does the confirmation say
+before it throws work away» from being verified by clicking through the app.
+
+The harness is `tests/harness/render.tsx`, and it is hand-written on top of
+`react-dom/client`, `act` and `querySelector` rather than pulled from a testing
+library. All of that is already a dependency of the app and of the preview
+tests, so nothing new is installed and nothing can go stale behind a version
+bump. What it gives up is a matcher vocabulary; in exchange a test reads the
+same selectors the interface renders, so renaming a class name breaks the test —
+which is the point.
+
+```tsx
+import { render, screen } from '../harness/render'
+
+render(<MessageList messages={messages} examples={[]} onExample={() => {}} />)
+screen.click('.turn-rewind')
+expect(screen.text('.confirm-question')).toContain('Вернуться')
+```
+
+A test file asks for the DOM with a `@vitest-environment jsdom` header at the
+top; everything else runs in Node as before. The harness stands in for the
+browser where jsdom has none (scrolling, layout), so a component that scrolls
+does not crash on mount and a test does not have to know it is running headless.
+
+To check that a test can still fail, break the component on purpose and read the
+failure. An assertion that passes both ways is decoration.
 
 ### Preview screenshot tests
 
