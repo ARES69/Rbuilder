@@ -1340,14 +1340,61 @@ select {
   flex: 1;
 }
 
-.file-list {
-  list-style: none;
-  margin: 0;
-  padding: var(--space-3) 0;
+/* The list column and its checkbox share one wrapper, so the checkbox stays
+   reachable after the list is closed instead of collapsing into nothing. */
+.file-list-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: none;
   width: 34%;
   min-width: 140px;
   max-width: 260px;
+  min-height: 0;
   border-right: 1px solid var(--line);
+}
+
+.file-list-wrap.is-collapsed {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.file-list-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 8px var(--space-4) 4px;
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+}
+
+.file-list-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Closed: the wrapper is a rail with just the checkbox on it. */
+.file-list-wrap.is-collapsed .file-list-toggle {
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.file-list-wrap.is-collapsed .file-list-toggle-label {
+  display: none;
+}
+
+.file-list {
+  list-style: none;
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--space-2) 0 var(--space-3);
   overflow-y: auto;
 }
 

@@ -1181,13 +1181,6 @@ const reset = useCallback(async () => {
                   ? 'Сборка…'
                   : 'Готов'}
           </span>
-          <span
-            className="zcode-chip"
-            title={workspace.metadata.localPath ?? 'Папка не привязана — создайте задачу с папкой'}
-          >
-            <span aria-hidden="true">▣</span>
-            {workspace.metadata.localPath ?? workspace.metadata.name}
-          </span>
           {workspace.metadata.localPath && isDesktop() ? (
             <button
               type="button"
