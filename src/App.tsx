@@ -6,7 +6,7 @@ import type { Approval, CommandApproval } from './components/ApprovalPanel'
 import { ChatPanel } from './components/ChatPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { BrowserSessionPanel } from './components/BrowserSessionPanel'
-import { TaskRail } from './components/TaskRail'
+import { TaskRail, type ShellPane } from './components/TaskRail'
 import type { DockTab } from './components/PreviewPane'
 import { DEFAULT_PROVIDER_PROFILES, execCommand, fetchAgentConfig, testProvider, type ProviderProfile } from './lib/agent'
 import { apiBase, isDesktop } from './lib/apiBase'
@@ -117,6 +117,12 @@ export default function App() {
   const [runningChecks, setRunningChecks] = useState(false)
   const [view, setView] = useState<View>('workspace')
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('inspector')
+  /**
+   * Below the narrow breakpoint the shell has room for one work pane, not two.
+   * Which one is the user's call, so it is remembered while they work — and
+   * asking for a file counts as asking to see the inspector.
+   */
+  const [narrowPane, setNarrowPane] = useState<ShellPane>('chat')
   /** A changed file asked for by the transcript or the inspector. */
   const [focusFile, setFocusFile] = useState<string | null>(null)
   /** Ask mode: the batch of writes currently waiting for (or declined by) the user. */
@@ -691,6 +697,7 @@ export default function App() {
   const openFile = useCallback((path: string) => {
     setFocusFile(path)
     setInspectorTab('code')
+    setNarrowPane('inspector')
   }, [])
 
   /** Opens the project folder in the system file explorer. */
@@ -1158,6 +1165,7 @@ const reset = useCallback(async () => {
     <div
       className={`app app--zcode${resizing ? ' is-dragging' : ''}`}
       ref={shellRef}
+      data-pane={narrowPane}
       style={
         {
           '--rail-width': railWidth === null ? undefined : `${railWidth}px`,
@@ -1182,6 +1190,8 @@ const reset = useCallback(async () => {
         onOpenProjects={() => setView('projects')}
         onExportProject={() => void exportProject()}
         onImportArchive={() => archiveInputRef.current?.click()}
+        pane={narrowPane}
+        onPaneChange={view === 'workspace' ? setNarrowPane : undefined}
       />
 
       <ColumnResizer
