@@ -32,4 +32,7 @@
 .settings-subhead { margin: 20px 0 0; color: var(--fg); font-size: 12px; font-weight: 500; }
 .settings-textarea { min-height: 64px; resize: vertical; font-family: var(--font-mono); font-size: 11px; }
 .settings-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 26px; }
+.instructions-panel { width: min(680px, 100%); }
+.instructions-textarea { min-height: 240px; line-height: 1.6; }
+.settings-hint { margin: 8px 0 0; color: var(--fg-faint); font-size: 11px; }
 @media (max-width: 560px) { .settings-grid { grid-template-columns: 1fr; } .settings-panel { padding: 20px; } }
