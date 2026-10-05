@@ -26,6 +26,7 @@ import {
 } from './lib/desktop'
 import { GIT_CHANGED_EVENT, readGitState } from './lib/git'
 import { InstructionsPanel } from './components/InstructionsPanel'
+import { planRewind } from './lib/rewind'
 import { INSTRUCTIONS_FILE, instructionsContext, instructionsSummary, readInstructions } from './lib/instructions'
 import {
   FOLDER_CHANGED_EVENT,
@@ -777,6 +778,28 @@ export default function App() {
     dispatch({ type: 'message/undo', id: message.id })
   }, [mirrorDelete, mirrorWrites])
 
+  /**
+   * Puts the project's files back the way they were before a turn, and marks
+   * every turn it undoes. The transcript stays: the user still has the record
+   * of what was tried, and the model can be told to do it differently.
+   */
+  const rewindTo = useCallback(
+    (index: number) => {
+      if (busyRef.current) return
+      const plan = planRewind(stateRef.current.messages, index)
+      for (const snapshot of plan.restore) {
+        dispatch({ type: 'project/write', path: snapshot.path, content: snapshot.before })
+        void mirrorWrites([{ path: snapshot.path, content: snapshot.before }])
+      }
+      for (const path of plan.remove) {
+        dispatch({ type: 'project/delete', path })
+        void mirrorDelete(path)
+      }
+      for (const id of plan.turnIds) dispatch({ type: 'message/undo', id })
+    },
+    [mirrorDelete, mirrorWrites],
+  )
+
   const setMode = useCallback((mode: AgentMode) => {
     modeRef.current = mode
     dispatch({ type: 'mode/set', mode })
@@ -1331,6 +1354,7 @@ const reset = useCallback(async () => {
           files={state.project.files}
           onOpenFile={openFile}
           onUndo={undoLastTurn}
+          onRewind={rewindTo}
           providerName={activeProvider.name}
           model={state.model ?? activeProvider.model}
           models={composerModels}

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AttachmentChips } from './AttachmentChips'
 import { Markdown } from './Markdown'
 import { lineDiff, totalDiff } from '../lib/diff'
 import { fileGlyph, fileGlyphClass } from '../lib/fileIcons'
+import { canRewindTo, planRewind, rewindSummary } from '../lib/rewind'
 import type { ChatMessage, ToolTraceEntry } from '../lib/store'
 import { collapseRepeats } from '../lib/transcript'
 
@@ -15,6 +16,8 @@ type Props = {
   onOpenFile?: (path: string) => void
   /** Reverts the last turn's writes to their pre-turn content. */
   onUndo?: (message: ChatMessage) => void
+  /** Puts the project's files back the way they were before this turn. */
+  onRewind?: (index: number) => void
 }
 
 type FileRow = { path: string; added: number | null; removed: number | null; isNew: boolean }
@@ -161,8 +164,10 @@ function MessageContent({ content, compact }: { content: string; compact: boolea
   )
 }
 
-export function MessageList({ messages, examples, onExample, files, onOpenFile, onUndo }: Props) {
+export function MessageList({ messages, examples, onExample, files, onOpenFile, onUndo, onRewind }: Props) {
   const endRef = useRef<HTMLDivElement>(null)
+  /** The turn whose rewind question is open, if any. */
+  const [asking, setAsking] = useState<string | null>(null)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
@@ -209,6 +214,10 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
       {rows.map(({ message, repeats }) => {
         const fileRows = turnFileRows(message, files)
         const streamingFiles = message.role === 'assistant' && message.status === 'streaming' && fileRows.length > 0
+        // Rows are collapsed repeats of real messages, so the index is looked up
+        // rather than counted: a rewind needs the position in the transcript.
+        const index = messages.indexOf(message)
+        const rewindable = index >= 0 && canRewindTo(messages, index)
 
         return (
           <article key={message.id} className={`turn turn--${message.role}`}>
@@ -218,6 +227,42 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
                 <span className="turn-repeat" title="Одинаковых сообщений подряд">
                   повтор ×{repeats}
                 </span>
+              ) : null}
+              {/*
+                Undo belongs to the newest turn, which gets it in the changes
+                card. This is the other half: any earlier point, said out loud
+                and confirmed, because it throws away everything after it.
+              */}
+              {rewindable ? (
+                asking === message.id ? (
+                  <span className="confirm-pair turn-rewind-confirm">
+                    <span className="confirm-question">
+                      {rewindSummary(planRewind(messages, index))}?
+                    </span>
+                    <button
+                      type="button"
+                      className="button button--danger"
+                      onClick={() => {
+                        onRewind?.(index)
+                        setAsking(null)
+                      }}
+                    >
+                      Откатить
+                    </button>
+                    <button type="button" className="button button--quiet" onClick={() => setAsking(null)}>
+                      Нет
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="turn-rewind"
+                    onClick={() => setAsking(message.id)}
+                    title="Вернуть файлы к состоянию до этого хода"
+                  >
+                    Вернуться сюда ↺
+                  </button>
+                )
               ) : null}
             </div>
 

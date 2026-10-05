@@ -37,6 +37,8 @@ type Props = {
   files: { path: string; content: string }[]
   onOpenFile: (path: string) => void
   onUndo: (message: ChatMessage) => void
+  /** Puts the project's files back the way they were before a turn. */
+  onRewind: (index: number) => void
   /** Provider + model shown in the composer, switchable in place. */
   providerName: string
   model: string | null
@@ -82,6 +84,7 @@ export function ChatPanel({
   files,
   onOpenFile,
   onUndo,
+  onRewind,
   providerName,
   model,
   models,
@@ -166,6 +169,7 @@ export function ChatPanel({
         files={files}
         onOpenFile={onOpenFile}
         onUndo={onUndo}
+        onRewind={onRewind}
       />
 
       <ApprovalPanel
