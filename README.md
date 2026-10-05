@@ -56,6 +56,12 @@ chat. Text-like files (code, markdown, JSON, CSV, …) are read and handed to th
 context, truncated at 64 KB. Anything else is passed as name, type and size, and the model is
 told the contents were not read.
 
+**Applications, not demos.** The agent writes a real project: folders and modules, as many pages
+as the app needs, npm packages, and the integrations those pages call. `index.html` is the entry
+point the preview opens; a `package.json` is written when the project needs real dependencies and
+scripts, which the terminal runs for real. Nothing is built for you, so there is no build step to
+forget — but nothing is collapsed into a single file either.
+
 **Live preview.** Files the agent writes go into an in-memory project. The preview builds that
 project into one document — linked stylesheets and `<script src>` files are inlined, because a
 sandboxed `srcdoc` document cannot resolve relative URLs — and renders it in an iframe. Rebuilds
@@ -373,5 +379,9 @@ In dev the page exposes two aids:
 
 Accounts and auth (the GitHub token is yours, pasted by you), hosted git — forges other than
 GitHub use whatever credentials the machine already has — a model picker, sessions and quotas,
-hosting and deployment, containers or a sandboxed terminal. The preview renders one
-self-contained HTML project; a build step and npm dependencies are out of scope by design.
+hosting and deployment, containers or a sandboxed terminal.
+
+The preview runs the front end of the application: whatever `index.html` loads, with npm
+packages pulled in at preview time, and no build step for anyone to run or remember. It does
+not host anything — a Node service, a database or a deploy target is something the project's own
+terminal can work with, not something this app runs for you.
