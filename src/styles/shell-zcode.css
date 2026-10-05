@@ -711,6 +711,25 @@
   margin-left: auto;
 }
 
+/*
+ * A turn's own commit, in the meta row beside the speaker label.
+ *
+ * It is a git object rather than a word, so it is monospace and the faintest
+ * thing on the line; the full hash lives in the tooltip for the times a person
+ * needs to paste it into a terminal.
+ */
+.turn-commit {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  user-select: all;
+}
+
 .changes-list {
   list-style: none;
   margin: 6px 0 0;

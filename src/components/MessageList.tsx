@@ -4,6 +4,7 @@ import { Markdown } from './Markdown'
 import { lineDiff, totalDiff } from '../lib/diff'
 import { fileGlyph, fileGlyphClass } from '../lib/fileIcons'
 import { canRewindTo, planRewind, rewindSummary } from '../lib/rewind'
+import { rewindTargetCommit } from '../lib/timeline'
 import type { ChatMessage, ToolTraceEntry } from '../lib/store'
 import { collapseRepeats } from '../lib/transcript'
 
@@ -218,6 +219,8 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
         // rather than counted: a rewind needs the position in the transcript.
         const index = messages.indexOf(message)
         const rewindable = index >= 0 && canRewindTo(messages, index)
+        // The commit a rewind here would land on: the turn just above this one.
+        const target = rewindTargetCommit(messages, index)
 
         return (
           <article key={message.id} className={`turn turn--${message.role}`}>
@@ -227,6 +230,14 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
                 <span className="turn-repeat" title="Одинаковых сообщений подряд">
                   повтор ×{repeats}
                 </span>
+              ) : null}
+              {/* The turn's own commit: what the branch points at, and what
+                  «Вернуться сюда» on a later turn lands on. Absent when the
+                  project is not a repository or the turn changed nothing. */}
+              {message.commit ? (
+                <code className="turn-commit" title={`Коммит этого хода: ${message.commit}`}>
+                  {message.commit}
+                </code>
               ) : null}
               {/*
                 Undo belongs to the newest turn, which gets it in the changes
@@ -238,6 +249,12 @@ export function MessageList({ messages, examples, onExample, files, onOpenFile, 
                   <span className="confirm-pair turn-rewind-confirm">
                     <span className="confirm-question">
                       {rewindSummary(planRewind(messages, index))}?
+                      {target ? (
+                        <>
+                          {' Ветка вернётся на '}
+                          <code className="turn-commit">{target}</code>
+                        </>
+                      ) : null}
                     </span>
                     <button
                       type="button"

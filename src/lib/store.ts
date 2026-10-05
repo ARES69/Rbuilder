@@ -38,6 +38,15 @@ export type ChatMessage = {
   snapshots?: TurnSnapshot[]
   /** Set once the user reverted this turn's writes. */
   undone?: boolean
+  /**
+   * The git commit this turn landed as, when the project is a repository.
+   *
+   * It is what makes «Вернуться сюда» a checkout of the branch rather than a
+   * replay of stored file contents. Absent for a turn that wrote nothing, for a
+   * project with no repository, and for turns recorded before this existed —
+   * which is exactly why the snapshot rewind stays as the fallback.
+   */
+  commit?: string
   /** Tool calls made while producing this turn. */
   tools?: ToolTraceEntry[]
   status?: MessageStatus
@@ -68,6 +77,7 @@ export type Action =
   | { type: 'assistant/set'; id: string; content: string; files?: string[] }
   | { type: 'assistant/finish'; id: string; status: MessageStatus; content?: string; files?: string[]; snapshots?: TurnSnapshot[] }
   | { type: 'message/undo'; id: string }
+  | { type: 'message/commit'; id: string; commit: string }
   | { type: 'tool/start'; messageId: string; call: ToolCall; detail: string }
   | { type: 'tool/end'; messageId: string; call: ToolCall; outcome: ToolOutcome }
   | { type: 'plan/set'; items: PlanItem[] }
@@ -157,6 +167,14 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         messages: state.messages.map((message) =>
           message.id === action.id ? { ...message, undone: true } : message,
+        ),
+      }
+
+    case 'message/commit':
+      return {
+        ...state,
+        messages: state.messages.map((message) =>
+          message.id === action.id ? { ...message, commit: action.commit } : message,
         ),
       }
 
