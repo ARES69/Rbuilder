@@ -360,6 +360,34 @@ select {
   color: var(--fg);
 }
 
+/* The second click of a destructive action, not the first. */
+.button--danger {
+  background: transparent;
+  color: var(--err);
+  border-color: var(--err);
+}
+.button--danger:hover:not(:disabled) {
+  background: var(--err);
+  color: #fff;
+}
+
+/*
+ * What a destructive button turns into once pressed: the question, and the two
+ * ways out of it. Kept inline in the row it belongs to, so the thing being
+ * deleted is still on screen while the question is asked.
+ */
+.confirm-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.confirm-question {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+}
+
 /* ------------------------------------------------------------------ */
 /* Transcript                                                         */
 /* ------------------------------------------------------------------ */
@@ -1500,7 +1528,11 @@ select {
 .file-editor-actions {
   display: flex;
   gap: var(--space-2);
-  flex: none;
+  /* Shrinkable: with a delete question open the row is wider than the panel,
+     and a max-content box would push «Спросить» off the right edge instead of
+     letting the buttons wrap. */
+  flex: 0 1 auto;
+  max-width: 100%;
   flex-wrap: wrap;
   row-gap: var(--space-2);
 }
