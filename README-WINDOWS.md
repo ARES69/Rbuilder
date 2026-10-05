@@ -6,8 +6,8 @@ RBuilder поставляется как нативное Windows-приложе
 
 | Файл | Что это |
 |---|---|
-| `RBuilder_0.1.7_x64_en-US.msi` | Установщик для всех пользователей (Program Files) |
-| `RBuilder_0.1.7_x64-setup.exe` | Установщик NSIS на одного пользователя, без прав администратора |
+| `RBuilder_0.1.9_x64_en-US.msi` | Установщик для всех пользователей (Program Files) |
+| `RBuilder_0.1.9_x64-setup.exe` | Установщик NSIS на одного пользователя, без прав администратора |
 | `rbuilder.exe` | Портативный запуск без установки (нужен `rbuilder-server.exe` рядом) |
 
 Оба установщика и портативный exe лежат в `src-tauri/target/release/bundle/` и `src-tauri/target/release/`.
@@ -52,11 +52,11 @@ pnpm exec tauri build
 
 ## Релизы через GitHub Actions
 
-Пуш тега `v*` (например, `v0.1.7`) запускает workflow [desktop-release](.github/workflows/desktop-release.yml): он typecheck'ает, гоняет тесты, собирает MSI и NSIS на `windows-latest`, подписывает установщики и exe через Azure Artifact Signing (если настроены секреты — см. [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md); без них сборка проходит как раньше, просто без подписи) и прикрепляет оба установщика к GitHub Release с автогенерированными release notes. Запустить сборку без тега можно вручную: вкладка Actions → desktop-release → Run workflow (артефакты появятся в самом запуске).
+Пуш тега `v*` (например, `v0.1.9`) запускает workflow [desktop-release](.github/workflows/desktop-release.yml): он typecheck'ает, гоняет тесты, собирает MSI и NSIS на `windows-latest`, подписывает установщики и exe через Azure Artifact Signing (если настроены секреты — см. [docs/CODE-SIGNING.md](docs/CODE-SIGNING.md); без них сборка проходит как раньше, просто без подписи) и прикрепляет оба установщика к GitHub Release с автогенерированными release notes. Запустить сборку без тега можно вручную: вкладка Actions → desktop-release → Run workflow (артефакты появятся в самом запуске).
 
 ```powershell
-git tag -a v0.1.7 -m "RBuilder 0.1.7"
-git push origin v0.1.7
+git tag -a v0.1.9 -m "RBuilder 0.1.9"
+git push origin v0.1.9
 ```
 
 ## Устранение неполадок
