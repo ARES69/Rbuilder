@@ -7,12 +7,15 @@
 //! native folder import and a real save dialog.
 
 mod folder_watch;
+mod project_folder;
+mod secrets;
 mod sidecar;
 mod workspace_files;
 
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use serde::Serialize;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 use workspace_files::ImportedProject;
@@ -33,6 +36,72 @@ async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, St
     // `blocking_*` is fine here: async commands run off the main thread.
     let picked = app.dialog().file().blocking_pick_folder();
     Ok(picked.map(|p| p.to_string()))
+}
+
+/// The folder a new task is given when nobody is asked to pick one.
+#[derive(Serialize)]
+pub struct ProjectFolder {
+    path: String,
+    name: String,
+}
+
+/// Creates `Documents/RBuilder/<name>` for a new task and answers with the
+/// folder that was actually taken — names are uniquified here, so the label the
+/// task gets is the one on disk.
+#[tauri::command]
+async fn ensure_project_folder(app: tauri::AppHandle, name: String) -> Result<ProjectFolder, String> {
+    let documents = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("cannot locate the documents folder: {e}"))?;
+    let (path, name) = project_folder::ensure_project_folder(&documents, &name)?;
+    Ok(ProjectFolder {
+        path: path.to_string_lossy().into_owned(),
+        name,
+    })
+}
+
+/// The GitHub token, when one was stored. Reads never fail loudly: a token that
+/// cannot be read is the same as no token.
+#[tauri::command]
+async fn github_token_get(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("cannot locate the app data folder: {e}"))?;
+    Ok(secrets::read(&dir))
+}
+
+/// Stores the GitHub token, or forgets it when given none.
+#[tauri::command]
+async fn github_token_set(app: tauri::AppHandle, token: Option<String>) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("cannot locate the app data folder: {e}"))?;
+    secrets::write(&dir, token.as_deref())
+}
+
+/// Opens a web page in the person's own browser.
+///
+/// A webview cannot usefully show github.com — it has no address bar, no
+/// password manager and no extensions — so the few places the app links out
+/// (minting a token, opening a repository) hand the page to the system instead.
+/// Only http and https are accepted: this command exists to open a page, and a
+/// `file://` or a program name is not one.
+#[tauri::command]
+async fn open_external(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(format!("refusing to open {url}"));
+    }
+    let result = if cfg!(target_os = "windows") {
+        std::process::Command::new("explorer").arg(&url).spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(&url).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&url).spawn()
+    };
+    result.map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -161,7 +230,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             pick_project_folder,
+            ensure_project_folder,
             read_project_files,
+            github_token_get,
+            github_token_set,
+            open_external,
             write_project_files,
             delete_project_file,
             reveal_in_explorer,

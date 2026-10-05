@@ -91,7 +91,7 @@ export const GIT_EXTRA_COMMAND = [
  * filename like `my notes.md` into `mynotes.md`. Only an embedded quote or a
  * newline can break out of the quotes, and both are refused outright.
  */
-function shellQuote(value: string): string | null {
+export function shellQuote(value: string): string | null {
   if (!value.trim() || /['\n\r\0]/.test(value)) return null
   return `'${value}'`
 }
@@ -113,7 +113,15 @@ export function gitCheckoutCommand(branch: string): string {
   return `git checkout -q -- ${safe} 2>/dev/null || git checkout -q -b -- ${safe}`
 }
 
-/** Tags the current commit; an empty or unquotable name is refused. */
+/**
+ * Identity for every command that may write a commit.
+ *
+ * The machine may have no global git identity at all — which is the usual case
+ * on a fresh Windows install — and a rebase replays commits, so it needs one
+ * too. Passing it per command keeps the project folder free of a local config
+ * the user did not ask for.
+ */
+export const GIT_IDENTITY = '-c user.name=RBUILDER -c user.email=rbuilder@local'
 export function gitTagCommand(name: string): string {
   const safe = shellQuote(name)
   if (!safe) return 'true'
@@ -286,6 +294,53 @@ export const GIT_PUSH_COMMAND =
 
 export const GIT_PULL_COMMAND = 'git pull --ff-only 2>&1'
 
+/**
+ * The remote URL, or an empty string when there is no `origin`.
+ *
+ * `--exit-code` is deliberately not used here: it would turn "no such remote"
+ * into a failed command, and having no remote is an ordinary state the panel
+ * has to be able to talk about.
+ */
+export const GIT_REMOTE_COMMAND = 'git remote get-url origin 2>/dev/null || true'
+
+/** Points `origin` at a URL, creating or repointing it as needed. */
+export function gitRemoteCommand(url: string): string {
+  const safe = shellQuote(url)
+  if (!safe) return 'true'
+  return `git remote add origin ${safe} 2>/dev/null || git remote set-url origin ${safe}`
+}
+
+/** The branch that is checked out; `main` when HEAD cannot say (no commits). */
+export const GIT_BRANCH_COMMAND =
+  'git symbolic-ref --short -q HEAD 2>/dev/null || echo main'
+
+/** Whether the remote has this branch, answered by asking the remote itself. */
+export function gitLsRemoteCommand(branch: string): string {
+  const safe = shellQuote(branch)
+  if (!safe) return 'echo'
+  return `git ls-remote --heads origin ${safe} 2>/dev/null || true`
+}
+
+/**
+ * Rebases onto the remote branch, which is what keeps a shared line linear.
+ *
+ * The identity is passed here too: a rebase re-commits what it replays, and a
+ * machine with no global git identity would stop the sync with "unable to
+ * auto-detect email address".
+ */
+export function gitPullRebaseCommand(branch: string): string {
+  const safe = shellQuote(branch)
+  if (!safe) return 'true'
+  return `git ${GIT_IDENTITY} pull --rebase origin ${safe} 2>&1`
+}
+
+/** Publishes the current branch and starts tracking the remote one. */
+export function gitPushBranchCommand(branch: string): string {
+  const safe = shellQuote(branch)
+  if (!safe) return 'true'
+  return `git push -u origin HEAD:${safe} 2>&1`
+}
+
 /** Fired after a git action so the sidebar summary can catch up. */
 export const GIT_CHANGED_EVENT = 'rbuilder:git-changed'
 
@@ -298,6 +353,18 @@ export function notifyGitChanged(): void {
 export function gitCommitCommand(message: string): string {
   const safe = message.replace(/"/g, "'").slice(0, 200)
   return `git -c user.name=RBUILDER -c user.email=rbuilder@local add -A && git -c user.name=RBUILDER -c user.email=rbuilder@local commit -q -m "${safe}"`
+}
+
+/**
+ * Stage everything and commit — but say nothing when there is nothing staged.
+ *
+ * `git commit` with a clean index exits 1, which a sync would report as a
+ * failure for the most ordinary outcome there is: the project simply has no
+ * new changes.
+ */
+export function gitCommitIfAnyCommand(message: string): string {
+  const safe = message.replace(/"/g, "'").slice(0, 200)
+  return `git add -A && if git diff --cached --quiet; then echo RB_NOTHING_TO_COMMIT; else git ${GIT_IDENTITY} commit -q -m "${safe}"; fi`
 }
 
 /** Parses the marked output of GIT_STATE_COMMAND. */
@@ -488,6 +555,12 @@ export async function runGit(
   signal?: AbortSignal,
   /** The bound project folder: git answers for the real repository. */
   cwd?: string,
+  /**
+   * True when a person asked for this command by pressing a button. The server
+   * refuses `git push` unless it is told a person did — the agent's terminal
+   * never sets it, so a prompt cannot talk the model into publishing.
+   */
+  allowGitPush = false,
 ): Promise<{ ok: boolean; output: string; error?: string }> {
   const parts: string[] = []
   let error: string | undefined
@@ -504,6 +577,8 @@ export async function runGit(
     },
     signal,
     cwd,
+    false,
+    allowGitPush,
   )
 
   return { ok: result.ok && !error, output: parts.join(''), error: result.error ?? error }

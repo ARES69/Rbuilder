@@ -226,6 +226,12 @@ const execRequestSchema = z.object({
    * would discard an edit made in the user's editor.
    */
   synced: z.boolean().optional(),
+  /**
+   * Set only by the Git panel and by Sync — the places where a person pressed
+   * a button to publish their own work. The agent's terminal never sets it, so
+   * `git push` stays refused there.
+   */
+  allowGitPush: z.boolean().optional(),
 })
 
 type RawTurn = z.infer<typeof turnSchema>
@@ -605,7 +611,7 @@ async function handleExec(req: IncomingMessage, res: ServerResponse, root: strin
     return
   }
 
-  const refusal = refusalFor(parsed.command)
+  const refusal = refusalFor(parsed.command, { allowGitPush: parsed.allowGitPush === true })
   if (refusal) {
     sendJson(res, 400, { message: refusal })
     return

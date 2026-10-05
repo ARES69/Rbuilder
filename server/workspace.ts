@@ -52,6 +52,9 @@ export type CommandEvent =
   | { type: 'exit'; code: number | null; timedOut: boolean }
   | { type: 'error'; message: string }
 
+/** Publishing is refused by default; see `refusalFor` for the one exception. */
+const GIT_PUSH = /\bgit\s+push\b/i
+
 const BLOCKED: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bsudo\b/i, reason: 'privileged commands are not available here' },
   { pattern: /\bdoas\b/i, reason: 'privileged commands are not available here' },
@@ -63,16 +66,28 @@ const BLOCKED: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bdd\s+if=/i, reason: 'refusing raw disk writes' },
   { pattern: /\/dev\/sd[a-z]/i, reason: 'refusing raw disk writes' },
   { pattern: /\b(shutdown|reboot|halt)\b/i, reason: 'refusing to stop the machine' },
-  { pattern: /\bgit\s+push\b/i, reason: 'refusing to push anywhere from the preview terminal' },
+  { pattern: GIT_PUSH, reason: 'refusing to push from the terminal' },
 ]
 
-export function refusalFor(command: string): string | null {
+/**
+ * Whether a command may run at all.
+ *
+ * `allowGitPush` is set by the Git panel and by Sync — the two places where a
+ * person pressed a button to publish their own work. The agent's terminal tool
+ * never sets it, so a prompt that talks the model into pushing still cannot
+ * push: the guard is about who asked, not about what the command looks like.
+ */
+export function refusalFor(
+  command: string,
+  options: { allowGitPush?: boolean } = {},
+): string | null {
   const trimmed = command.trim()
   if (!trimmed) return 'Type a command first.'
   if (trimmed.length > MAX_COMMAND_LENGTH) {
     return `Commands are limited to ${MAX_COMMAND_LENGTH} characters.`
   }
   for (const entry of BLOCKED) {
+    if (entry.pattern === GIT_PUSH && options.allowGitPush) continue
     if (entry.pattern.test(trimmed)) return `Blocked: ${entry.reason}.`
   }
   return null

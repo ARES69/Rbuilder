@@ -1,5 +1,5 @@
 .settings-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.48); }
-.settings-panel { width: min(560px, 100%); max-height: calc(100vh - 48px); overflow: auto; padding: 26px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--bg); color: var(--fg); box-shadow: 0 24px 80px rgba(0,0,0,.28); }
+.settings-panel { width: min(560px, 100%); max-height: calc(100vh - 48px); overflow: auto; padding: 26px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: var(--fg); box-shadow: 0 24px 80px rgba(0,0,0,.28); }
 .settings-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .settings-head h2 { margin: 0; font-size: 21px; font-weight: 500; letter-spacing: -.025em; }
 .icon-button { appearance: none; border: 0; background: none; color: var(--fg-muted); font-size: 24px; line-height: 1; cursor: pointer; }
@@ -7,18 +7,18 @@
 .settings-label { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; color: var(--fg-muted); font-size: 11px; }
 .settings-optional { color: var(--fg-faint); }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.settings-input { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 6px; outline: none; background: var(--bg-subtle); color: var(--fg); font-size: 13px; }
+.settings-input { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); outline: none; background: var(--bg-subtle); color: var(--fg); font-size: 13px; }
 .settings-input:focus { border-color: var(--fg-muted); }
 .settings-status { margin: 15px 0 0; padding: 9px 10px; border-left: 2px solid var(--fg); color: var(--fg-muted); font-size: 12px; }
 .settings-status--ok { border-left-color: #8fac63; }
 .model-field-row { display: flex; gap: 6px; }
 .model-field-row .settings-input { flex: 1; }
-.model-refresh-button { appearance: none; flex: 0 0 auto; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-subtle); color: var(--fg-muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.model-refresh-button { appearance: none; flex: 0 0 auto; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg-subtle); color: var(--fg-muted); font-size: 15px; line-height: 1; cursor: pointer; }
 .model-refresh-button:hover:not(:disabled) { border-color: var(--fg-muted); color: var(--fg); }
 .model-refresh-button:disabled { opacity: .5; cursor: default; }
 .model-pick { margin-top: 6px; color: var(--fg-muted); font-size: 12px; }
 .browser-session-panel { max-width: 520px; }
-.browser-session-status { display: flex; align-items: flex-start; gap: 10px; margin: 18px 0; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-subtle); }
+.browser-session-status { display: flex; align-items: flex-start; gap: 10px; margin: 18px 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-subtle); }
 .browser-session-status .status-dot { margin-top: 5px; }
 .browser-session-status strong, .browser-session-status small { display: block; }
 .browser-session-status strong { font-size: 12px; font-weight: 500; }

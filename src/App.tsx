@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react'
 import { InspectorPanel, type InspectorTab } from './components/InspectorPanel'
+import { ColumnResizer, readStoredColumnWidth, storeColumnWidth } from './components/ColumnResizer'
 import type { Approval, CommandApproval } from './components/ApprovalPanel'
 import { ChatPanel } from './components/ChatPanel'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -11,8 +12,8 @@ import { apiBase, isDesktop } from './lib/apiBase'
 import {
   deleteProjectFile,
   deleteViaDirectoryHandle,
+  ensureProjectFolder,
   pickProjectFolder,
-  pickProjectFolderPath,
   readProjectFolder,
   readViaDirectoryHandle,
   revealInExplorer,
@@ -89,6 +90,17 @@ import {
 type View = 'workspace' | 'projects'
 type NavId = 'workspace' | 'projects' | 'settings'
 
+/** Where the two resizable columns remember their width between launches. */
+const RAIL_WIDTH_KEY = 'rbuilder:rail-width'
+const INSPECTOR_WIDTH_KEY = 'rbuilder:inspector-width'
+
+/** The widths the stylesheet asks for, and the room the chat keeps. */
+const RAIL_DEFAULT_WIDTH = 232
+const INSPECTOR_DEFAULT_WIDTH = 400
+/** Chat, plus the other panel's narrowest form, plus the gutters. */
+const RAIL_RESERVE = 720
+const INSPECTOR_RESERVE = 640
+
 /** What the sidebar reports about the terminal workspace, straight from git. */
 type GitSummary = { isRepo: boolean; branch: string | null; changes: number; lastCommit: string | null }
 
@@ -153,6 +165,27 @@ export default function App() {
   const [git, setGit] = useState<GitSummary | null>(null)
   const [browserSessionOpen, setBrowserSessionOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /**
+   * The shell's three columns. The chat always takes what is left; the rail and
+   * the inspector are dragged to a width and remembered, because re-arranging
+   * the window on every launch is not something anyone wants to do twice.
+   */
+  const shellRef = useRef<HTMLDivElement>(null)
+  const [railWidth, setRailWidth] = useState<number | null>(() => readStoredColumnWidth(RAIL_WIDTH_KEY))
+  const [inspectorWidth, setInspectorWidth] = useState<number | null>(() =>
+    readStoredColumnWidth(INSPECTOR_WIDTH_KEY),
+  )
+  const [resizing, setResizing] = useState(false)
+
+  const resizeRail = useCallback((next: number | null) => {
+    setRailWidth(next)
+    storeColumnWidth(RAIL_WIDTH_KEY, next)
+  }, [])
+
+  const resizeInspector = useCallback((next: number | null) => {
+    setInspectorWidth(next)
+    storeColumnWidth(INSPECTOR_WIDTH_KEY, next)
+  }, [])
   const [providers, setProviders] = useState<ProviderProfile[]>(loadProviderProfiles)
   const [activeProviderId, setActiveProviderId] = useState(() => loadActiveProviderId())
   // Saved provider lists from older builds may miss entries the current presets
@@ -775,41 +808,49 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /**
-   * A new task starts empty and bound to a folder the user picks: everything
-   * the model writes lands there. Cancelling the pick keeps the current task.
-   */
-  const reset = useCallback(async () => {
-    if (busyRef.current) return
-    if (!window.confirm('Новая задача? Текущий чат останется в истории задач.')) {
-      return
+/**
+ * A new task starts empty and bound to a folder it is given rather than one it
+ * has to ask for: the shell creates `Documents\RBuilder\<name>` and everything
+ * the model writes lands there. Nothing is lost by starting a task — this one
+ * stays in the rail with its own history — so there is nothing to confirm
+ * either.
+ */
+const reset = useCallback(async () => {
+  if (busyRef.current) return
+
+  let folder: string | null = null
+  let name = 'Новый проект'
+
+  if (isDesktop()) {
+    try {
+      const created = await ensureProjectFolder(name)
+      folder = created.path
+      name = created.name
+    } catch (error) {
+      // A task without a folder still works: its files live in the app until it
+      // is exported or bound to one by hand.
+      console.warn('Не удалось создать папку проекта:', error)
     }
-
-    let folder: string | null = null
-    let name = 'Новый проект'
-
-    if (isDesktop()) {
-      const picked = await pickProjectFolderPath()
-      if (!picked) return
-      folder = picked
-      name = picked.split(/[\\/]/).pop() || name
-    } else {
-      // The browser binds through a File System Access handle: same mirroring,
-      // but the permission lives only for this page session.
-      folderHandleRef.current = null
-      const picker = (window as unknown as { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker
-      if (picker) {
-        try {
-          const handle = (await picker()) as DirectoryHandle
-          folderHandleRef.current = handle
-          name = handle.name || name
-        } catch (error) {
-          if (error instanceof DOMException && error.name === 'AbortError') return
-          // A refused handle still allows a task — just without disk binding.
+  } else {
+    // The browser binds through a File System Access handle: same mirroring,
+    // but the permission lives only for this page session — and a task does not
+    // wait on it.
+    folderHandleRef.current = null
+    const picker = (window as unknown as { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker
+    if (picker) {
+      try {
+        const handle = (await picker()) as DirectoryHandle
+        folderHandleRef.current = handle
+        name = handle.name || name
+      } catch (error) {
+        // A dismissed or refused picker still allows a task, just without disk
+        // binding behind it.
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          console.warn('Папка проекта не выбрана:', error)
         }
       }
     }
-
+  }
     const fresh = createInitialState()
     projectRef.current = fresh.project
     inspector.clear()
@@ -1085,7 +1126,16 @@ export default function App() {
   }, [send, setMode])
 
   return (
-    <div className="app app--zcode">
+    <div
+      className={`app app--zcode${resizing ? ' is-dragging' : ''}`}
+      ref={shellRef}
+      style={
+        {
+          '--rail-width': railWidth === null ? undefined : `${railWidth}px`,
+          '--inspector-width': inspectorWidth === null ? undefined : `${inspectorWidth}px`,
+        } as CSSProperties
+      }
+    >
       <TaskRail
         workspaces={workspaces.length > 0 ? workspaces : [workspace]}
         activeId={workspace.metadata.id}
@@ -1103,6 +1153,18 @@ export default function App() {
         onOpenProjects={() => { setActiveNav('projects'); setView('projects') }}
         onExportProject={() => void exportProject()}
         onImportArchive={() => archiveInputRef.current?.click()}
+      />
+
+      <ColumnResizer
+        side="start"
+        containerRef={shellRef}
+        min={180}
+        reserve={RAIL_RESERVE}
+        value={railWidth}
+        defaultWidth={RAIL_DEFAULT_WIDTH}
+        onWidthChange={resizeRail}
+        onDragChange={setResizing}
+        label="Ширина панели задач"
       />
 
       <section className="zcode-chat" aria-label="Чат с агентом">
@@ -1182,6 +1244,18 @@ export default function App() {
           }}
         />
       </section>
+
+      <ColumnResizer
+        side="end"
+        containerRef={shellRef}
+        min={280}
+        reserve={INSPECTOR_RESERVE}
+        value={inspectorWidth}
+        defaultWidth={INSPECTOR_DEFAULT_WIDTH}
+        onWidthChange={resizeInspector}
+        onDragChange={setResizing}
+        label="Ширина панели инспектора"
+      />
 
       <InspectorPanel
         tab={inspectorTab}
