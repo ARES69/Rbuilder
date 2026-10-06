@@ -16,7 +16,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '../harness/render'
+import { render, screen } from '../harness'
 import { ApprovalPanel, type Approval, type CommandApproval } from '../../src/components/ApprovalPanel'
 
 /** The project as it stands, which proposed writes are diffed against. */
@@ -54,6 +54,27 @@ describe('Правки, ждущие разрешения', () => {
     expect(screen.texts('.approval-path')).toEqual(['app.js', 'new.js'])
     // One added line to a file that existed, plus a file of its own.
     expect(screen.text('.approval-totals')).toBe('+2 −0')
+  })
+
+  it('показывает, сколько строк добавит каждый файл, а не только сумму', () => {
+    // The header total is a summary. The row is what says which file is about
+    // to grow, and a batch whose total is right while every row reads "+0" is
+    // a batch the user cannot judge before allowing it.
+    render(
+      <ApprovalPanel
+        approval={fileApproval([
+          { path: 'app.js', content: 'v1\nv2\nv3\n' },
+          { path: 'new.js', content: 'created\n' },
+        ])}
+        files={FILES}
+        onApprove={() => {}}
+        onReject={() => {}}
+      />,
+    )
+
+    expect(screen.texts('.approval-path')).toEqual(['app.js', 'new.js'])
+    expect(screen.texts('.approval-file .diff-add')).toEqual(['+2', '+1'])
+    expect(screen.texts('.approval-file .diff-del')).toEqual(['−0', '−0'])
   })
 
   it('разрешает и отклоняет по нажатию', () => {
