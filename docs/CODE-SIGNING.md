@@ -66,7 +66,7 @@ Workflow [desktop-release.yml](.github/workflows/desktop-release.yml):
 3. `Verify signatures` — `Get-AuthenticodeSignature` проверяет, что все четыре файла подписаны (`Status: Valid`); битая подпись валит сборку, unsigned-релиз не выкладывается.
 4. Подписанные файлы уходят в артефакты и на GitHub Release как обычно.
 
-Проверить подпись локально после скачивания: `(Get-AuthenticodeSignature .\RBuilder_0.1.10_x64-setup.exe).Status` → `Valid`.
+Проверить подпись локально после скачивания: `(Get-AuthenticodeSignature .\RBuilder_0.2.0_x64-setup.exe).Status` → `Valid`.
 
 ## Ускорение набора репутации
 
