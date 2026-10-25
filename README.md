@@ -334,7 +334,8 @@ person does — press a button, read what the screen says. It is what keeps
 behaviour like «which turn offers a rewind» and «what does the confirmation say
 before it throws work away» from being verified by clicking through the app.
 
-The harness is `tests/harness/render.tsx`, and it is hand-written on top of
+The harness is `tests/harness/` — a small internal library with its own
+[API reference](tests/harness/README.md) and self-tests. It is hand-written on top of
 `react-dom/client`, `act` and `querySelector` rather than pulled from a testing
 library. All of that is already a dependency of the app and of the preview
 tests, so nothing new is installed and nothing can go stale behind a version
@@ -343,7 +344,7 @@ same selectors the interface renders, so renaming a class name breaks the test �
 which is the point.
 
 ```tsx
-import { render, screen } from '../harness/render'
+import { render, screen } from '../harness'
 
 render(<MessageList messages={messages} examples={[]} onExample={() => {}} />)
 screen.click('.turn-rewind')
@@ -354,6 +355,12 @@ A test file asks for the DOM with a `@vitest-environment jsdom` header at the
 top; everything else runs in Node as before. The harness stands in for the
 browser where jsdom has none (scrolling, layout), so a component that scrolls
 does not crash on mount and a test does not have to know it is running headless.
+
+The harness is tested too. `tests/harness/` covers the parts a component test
+silently depends on: that `screen.type` reaches React's state and not just the
+DOM, that a button labelled differently throws instead of being clicked anyway,
+and that nothing stays mounted for the next test. Those self-tests run with the
+rest of `pnpm test`, and a change to the harness should come with one.
 
 To check that a test can still fail, break the component on purpose and read the
 failure. An assertion that passes both ways is decoration.

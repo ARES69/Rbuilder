@@ -556,4 +556,39 @@ describe('search-and-replace edits', () => {
     expect(result.files).toEqual([])
     expect(result.prose).toContain('app.js')
   })
+
+  it('runs the tool calls of one step one after another, in the order they arrived', async () => {
+    // A provider may ask for several tools in a single answer. They are run one
+    // at a time: a slow first call must finish before the second one starts, and
+    // both results must reach the model in the order it asked for them.
+    const bodies = installProvider((step) =>
+      step > 1
+        ? [{ type: 'delta', delta: 'All done.' }]
+        : [
+            { type: 'delta', delta: 'Checking two things.' },
+            { type: 'tool_call', id: 'a', name: 'inspect_preview', arguments: '{}' },
+            { type: 'tool_call', id: 'b', name: 'run_checks', arguments: '{}' },
+          ],
+    )
+    const rec = recorder()
+    const log: string[] = []
+
+    const result = await runAgentTurn(
+      { turns: ASK, mode: 'build' },
+      {
+        ...rec.hooks,
+        onToolStart: (call) => log.push(`start:${call.id}`),
+        onToolEnd: (call) => log.push(`end:${call.id}`),
+        execute: async (call) => {
+          // A slow first call would appear after `start:b` if the two overlapped.
+          await new Promise((resolve) => setTimeout(resolve, call.id === 'a' ? 50 : 1))
+          return { ok: true, summary: 'checked', text: `result of ${call.name}` }
+        },
+      },
+    )
+
+    expect(result.toolCalls).toBe(2)
+    expect(log).toEqual(['start:a', 'end:a', 'start:b', 'end:b'])
+    expect(bodies[1]!.turns.flatMap((turn) => (turn.role === 'tool' ? [turn.toolCallId] : []))).toEqual(['a', 'b'])
+  })
 })

@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '../harness/render'
+import { render, screen } from '../harness'
 import { MessageList } from '../../src/components/MessageList'
 import type { ChatMessage } from '../../src/lib/store'
 
